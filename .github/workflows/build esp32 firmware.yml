@@ -57,7 +57,14 @@ jobs:
             git wget flex bison gperf python3 python3-pip python3-venv \
             cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-      # 4. 克隆并配置 ESP-IDF（仅在缓存未命中时）
+      # 4. 初始化MicroPython
+      - name: 初始化MicroPython
+        run: |
+          cd ${{ env.MICROPYTHON_DIR }}
+          git submodule update --init --depth 1
+          make -C mpy-cross
+
+      # 5. 克隆并配置 ESP-IDF（仅在缓存未命中时）
       - name: 克隆并配置 ESP-IDF
         if: steps.cache_all.outputs.cache-hit != 'true'
         run: |
@@ -70,19 +77,18 @@ jobs:
           git clone https://github.com/espressif/esp-sr.git \
             ${{ env.ESP_IDF_DIR }}/components/esp32-sr
 
-      # 5. 编译固件
+      # 6. 编译固件
       - name: 编译固件
         run: |
           source ${{ env.ESP_IDF_DIR }}/export.sh
           cd ${{ env.MICROPYTHON_DIR }}/ports/esp32
-          make submodules
           make BOARD=${{ matrix.board }} \
                BOARD_VARIANT=${{ matrix.variant }} \
                FLASH_SIZE=${{ matrix.flash_size }}MB \
                USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/asr/micropython.cmake" \
                -j$(nproc)
 
-      # 6. 重命名并收集固件
+      # 7. 重命名并收集固件
       - name: 重命名并收集固件
         run: |
           mkdir -p ${{ env.ARTIFACTS_DIR }}
@@ -98,7 +104,7 @@ jobs:
             exit 1
           fi
 
-      # 7. 上传构建产物
+      # 8. 上传构建产物
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
