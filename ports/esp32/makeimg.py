@@ -46,6 +46,10 @@ arg_application_bin = sys.argv[4]
 arg_output_bin = sys.argv[5]
 arg_output_uf2 = sys.argv[6]
 
+# Additional bin files for complete firmware
+arg_srmodels_bin = sys.argv[7] if len(sys.argv) > 7 else None
+arg_esp_tts_data = sys.argv[8] if len(sys.argv) > 8 else None
+
 # Load required sdkconfig values.
 idf_target = load_sdkconfig_str_value(arg_sdkconfig, "IDF_TARGET", "").upper()
 offset_bootloader = load_sdkconfig_hex_value(
@@ -77,14 +81,25 @@ files_in = [
     ("partitions", offset_partitions, max_size_partitions, arg_partitions_bin),
     ("application", offset_application, max_size_application, arg_application_bin),
 ]
+
+# Add additional bin files if provided
+if arg_srmodels_bin and os.path.exists(arg_srmodels_bin):
+    files_in.append(("srmodels", 0x810000, 0x400000, arg_srmodels_bin))  # 4MB max size for srmodels
+
+if arg_esp_tts_data and os.path.exists(arg_esp_tts_data):
+    files_in.append(("esp_tts_data", 0xc17000, 0x3e9000, arg_esp_tts_data))  # ~4MB max size for TTS data
+
 file_out = arg_output_bin
+
+# Sort files by offset to ensure correct order
+files_in.sort(key=lambda x: x[1])
 
 # Write output file with combined firmware.
 cur_offset = offset_bootloader
 with open(file_out, "wb") as fout:
     for name, offset, max_size, file_in in files_in:
-        assert offset >= cur_offset
-        fout.write(b"\xff" * (offset - cur_offset))
+        if offset > cur_offset:
+            fout.write(b"\xff" * (offset - cur_offset))
         cur_offset = offset
         with open(file_in, "rb") as fin:
             data = fin.read()

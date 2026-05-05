@@ -2,8 +2,6 @@
 #
 # This is a simple, convenience wrapper around idf.py (which uses cmake).
 
-include ../../py/verbose.mk
-
 # Select the board to build for:
 ifdef BOARD_DIR
 # Custom board path - remove trailing slash and get the final component of
@@ -11,7 +9,7 @@ ifdef BOARD_DIR
 BOARD ?= $(notdir $(BOARD_DIR:/=))
 else
 # If not given on the command line, then default to ESP32_GENERIC.
-BOARD ?= ESP32_GENERIC
+BOARD ?= ESP32_GENERIC_S3
 BOARD_DIR ?= boards/$(BOARD)
 endif
 
@@ -21,6 +19,8 @@ $(warning The GENERIC* boards have been renamed to ESP32_GENERIC*)
 endif
 $(error Invalid BOARD specified: $(BOARD_DIR))
 endif
+
+
 
 # If the build directory is not given, make it reflect the board name (and
 # optionally the board variant).
@@ -40,10 +40,13 @@ endif
 DEVICE += $(PORT_ARG) $(BAUD_ARG)
 
 PYTHON ?= python3
+ 
+.PHONY: all clean deploy flash-firmware erase submodules copy_modules FORCE 
 
-.PHONY: all clean deploy erase submodules FORCE
+USER_C_MODULES = ../../../examples/usercmodule/micropython.cmake
 
 CMAKE_ARGS =
+
 
 ifdef USER_C_MODULES
 	CMAKE_ARGS += -DUSER_C_MODULES=${USER_C_MODULES}
@@ -63,25 +66,34 @@ ifdef MICROPY_PREVIEW_VERSION_2
 	IDFPY_FLAGS += -D MICROPY_PREVIEW_VERSION_2=1
 endif
 
-ifeq ($(BUILD_VERBOSE),1)
-	IDFPY_FLAGS += --verbose
-endif
-
 HELP_BUILD_ERROR ?= "See \033[1;31mhttps://github.com/micropython/micropython/wiki/Build-Troubleshooting\033[0m"
 
 define RUN_IDF_PY
-	$(Q)idf.py $(IDFPY_FLAGS) -B $(BUILD) $(1)
+	idf.py $(IDFPY_FLAGS) -B $(BUILD) $(1)
 endef
 
+# 拷贝文件
+GREAT_GRANDPARENT_DIR := $(shell dirname $(shell dirname $(shell dirname $(shell pwd))))
+
+SDCARD_PATH := $(GREAT_GRANDPARENT_DIR)/micropython/lib/micropython-lib/micropython/drivers/storage/sdcard/sdcard.py
+
+SRC_MODULES := modules/sdcard.py
+
+
+
 all:
-	$(Q)idf.py $(IDFPY_FLAGS) -B $(BUILD) build || (echo -e $(HELP_BUILD_ERROR); false)
-	$(Q)$(PYTHON) makeimg.py \
+	idf.py $(IDFPY_FLAGS) -B $(BUILD) build || (echo -e $(HELP_BUILD_ERROR); false)
+	@$(PYTHON) makeimg.py \
 		$(BUILD)/sdkconfig \
 		$(BUILD)/bootloader/bootloader.bin \
 		$(BUILD)/partition_table/partition-table.bin \
 		$(BUILD)/micropython.bin \
 		$(BUILD)/firmware.bin \
-		$(BUILD)/micropython.uf2
+		$(BUILD)/micropython.uf2 \
+		$(BUILD)/srmodels/srmodels.bin \
+		../../../esp-idf/components/esp-sr/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat
+
+#$(call RUN_IDF_PY,$(DEVICE) flash)
 
 $(BUILD)/bootloader/bootloader.bin $(BUILD)/partition_table/partition-table.bin $(BUILD)/micropython.bin: FORCE
 
@@ -91,6 +103,11 @@ clean:
 deploy:
 	$(call RUN_IDF_PY,$(DEVICE) flash)
 
+# 使用打包好的firmware.bin文件进行烧录
+flash-firmware:
+	@echo "Flashing complete firmware.bin..."
+	$(PYTHON) -m esptool --chip esp32s3 -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(BUILD)/firmware.bin
+
 erase:
 	$(call RUN_IDF_PY,$(DEVICE) erase-flash)
 
@@ -98,18 +115,32 @@ monitor:
 	$(call RUN_IDF_PY,$(DEVICE) monitor)
 
 size:
-	$(call RUN_IDF_PY,size $(SIZE_FLAGS))
+	$(call RUN_IDF_PY,size)
 
 size-components:
-	$(call RUN_IDF_PY,size-components $(SIZE_FLAGS))
+	$(call RUN_IDF_PY,size-components)
 
 size-files:
 	$(call RUN_IDF_PY,size-files)
 
-# Run idf.py with the UPDATE_SUBMODULES flag to update
-# necessary submodules for this board.
-#
-# This is done in a dedicated build directory as some CMake cache values are not
-# set correctly if not all submodules are loaded yet.
+menuconfig:
+	$(call RUN_IDF_PY,$(DEVICE) menuconfig)
+
+
+
+
+# Running the build with ECHO_SUBMODULES set will trigger py/mkrules.cmake to
+# print out the value of the GIT_SUBMODULES variable, prefixed with
+# "GIT_SUBMODULES", and then abort. This extracts out that line from the idf.py
+# output and passes the list of submodules to py/mkrules.mk which does the
+# `git submodule init` on each.
+# @cp -r $(SDCARD_PATH) $(SRC_MODULES)
 submodules:
-	$(Q)idf.py $(IDFPY_FLAGS) -B $(BUILD)/submodules -D UPDATE_SUBMODULES=1 reconfigure
+	@GIT_SUBMODULES=$$(idf.py $(IDFPY_FLAGS) -B $(BUILD)/submodules -D ECHO_SUBMODULES=1 build 2>&1 | \
+	                  grep '^GIT_SUBMODULES=' | cut -d= -f2); \
+	$(MAKE) -f ../../py/mkrules.mk GIT_SUBMODULES="$${GIT_SUBMODULES}" submodules
+
+# 复制文件规则
+copy_modules:
+	@echo "Copying from: $(SDCARD_PATH)"
+	@cp -r $(SDCARD_PATH) $(SRC_MODULES)
