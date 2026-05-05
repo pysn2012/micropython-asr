@@ -192,11 +192,11 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
         },
     };
     std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT;
-	if (mlck != -1) gpio_cfg.mclk = (gpio_num_t)mlck;
-    if (blck != -1) gpio_cfg.bclk = (gpio_num_t)blck;
-    if (lrck != -1) gpio_cfg.ws   = (gpio_num_t)lrck;
-    if (dout != -1) gpio_cfg.dout = (gpio_num_t)dout;
-    if (dsin != -1) gpio_cfg.din  = (gpio_num_t)dsin;
+	if (mlck != -1) std_cfg.gpio_cfg.mclk = (gpio_num_t)mlck;
+    if (blck != -1) std_cfg.gpio_cfg.bclk = (gpio_num_t)blck;
+    if (lrck != -1) std_cfg.gpio_cfg.ws   = (gpio_num_t)lrck;
+    if (dout != -1) std_cfg.gpio_cfg.dout = (gpio_num_t)dout;
+    if (dsin != -1) std_cfg.gpio_cfg.din  = (gpio_num_t)dsin;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
