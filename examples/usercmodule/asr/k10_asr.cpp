@@ -60,7 +60,7 @@ static TaskHandle_t tts_task_handle = NULL;
 static i2s_chan_handle_t rx_handle = NULL;
 static i2s_chan_handle_t tx_handle = NULL;
 
-static esp_afe_sr_iface_t *afe_handle = NULL;
+static const esp_afe_sr_iface_t *afe_handle = NULL;
 srmodel_list_t *models = NULL;
 
 
@@ -179,11 +179,11 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000), // 16kHz 采样率
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
-            .mclk = mlck,
-            .bclk = blck,  // I2S BCLK
-            .ws = lrck,    // I2S WS/LRCK
-            .dout = dout,
-            .din = dsin,   // I2S DATA IN
+            .mclk =  (gpio_num_t)mlck,
+            .bclk =  (gpio_num_t)blck,  // I2S BCLK
+            .ws =  (gpio_num_t)lrck,    // I2S WS/LRCK
+            .dout =  (gpio_num_t)dout,
+            .din =  (gpio_num_t)dsin,   // I2S DATA IN
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
@@ -196,7 +196,6 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
-    es7243e_init();
 }
 
 // 音频采集任务
@@ -230,9 +229,6 @@ extern "C" __attribute__((weak)) void free_asr(void){
         i2s_del_channel(tx_handle);
         tx_handle = NULL;
     }
-     // 3. 释放I2C资源
-     i2c_driver_delete(I2C_MASTER_NUM);
-
     if(tts_task_handle) {
         vTaskDelete(tts_task_handle);
         tts_task_handle = NULL;
