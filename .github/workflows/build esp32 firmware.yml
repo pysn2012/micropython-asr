@@ -1,0 +1,105 @@
+name: build mpy with asr
+
+# 仅手动触发
+on:
+  workflow_dispatch:
+
+# 并发控制：同一分支只保留最新一次
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MICROPYTHON_DIR: ${{ github.workspace }}
+  ESP_IDF_DIR: ${{ github.workspace }}/esp-idf
+  ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+  # esp-idf版本，不建议修改
+  ESP_IDF_VERSION: v5.5.1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+      # 开发板矩阵，可以添加不同的开发板
+        include:
+          - board: ESP32_GENERIC_S3
+            variant: SPIRAM_OCT
+            flash_size: 16
+          - board: ESP32_GENERIC_S3
+            variant: SPIRAM_OCT
+            flash_size: 8
+
+    steps:
+      # 1. 检出当前仓库
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # 2. 缓存 ESP-IDF 与 MicroPython
+      - name: Cache ESP-IDF and MicroPython
+        id: cache_all
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ESP_IDF_DIR }}
+            ~/.espressif/
+            ~/.cache/pip/
+            ${{ env.MICROPYTHON_DIR }}
+          key: mpy-asr-idf-${{ env.ESP_IDF_VERSION }}
+
+      # 3. 安装系统依赖（仅在缓存未命中时）
+      - name: Install system dependencies
+        if: steps.cache_all.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git wget flex bison gperf python3 python3-pip python3-venv \
+            cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
+      # 4. 克隆并配置 ESP-IDF（仅在缓存未命中时）
+      - name: Clone & setup ESP-IDF
+        if: steps.cache_all.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.ESP_IDF_VERSION }} \
+            https://github.com/espressif/esp-idf.git ${{ env.ESP_IDF_DIR }}
+          git -C ${{ env.ESP_IDF_DIR }} submodule update --init --recursive --filter=tree:0
+          ${{ env.ESP_IDF_DIR }}/install.sh esp32,esp32s3,esp32c3
+
+          # 添加 esp32-sr（适配 MicroPython）
+          git clone https://github.com/espressif/esp-sr.git \
+            ${{ env.ESP_IDF_DIR }}/components/esp32-sr
+
+      # 5. 编译固件
+      - name: Build firmware
+        run: |
+          source ${{ env.ESP_IDF_DIR }}/export.sh
+          cd ${{ env.MICROPYTHON_DIR }}/ports/esp32
+          make BOARD=${{ matrix.board }} \
+               BOARD_VARIANT=${{ matrix.variant }} \
+               FLASH_SIZE=${{ matrix.flash_size }}MB \
+               USER_C_MODULES="${{ github.workspace }}/micropython-asr/examples/usercmodule/asr/micropython.cmake" \
+               -j$(nproc)
+
+      # 6. 重命名并收集固件
+      - name: Rename firmware
+        run: |
+          mkdir -p ${{ env.ARTIFACTS_DIR }}
+          BOARD_NAME="${{ matrix.board }}"
+          [[ -n "${{ matrix.variant }}" ]] && BOARD_NAME+="-${{ matrix.variant }}"
+          FW_PATH="${{ env.MICROPYTHON_DIR }}/ports/esp32/build-${BOARD_NAME}/firmware.bin"
+          OUT_NAME="${{ matrix.board }}${{ matrix.variant && format('_{0}', matrix.variant) || '' }}_${{ matrix.flash_size }}MB.bin"
+
+          if [[ -f "$FW_PATH" ]]; then
+            cp "$FW_PATH" "${{ env.ARTIFACTS_DIR }}/$OUT_NAME"
+          else
+            echo "Firmware not found at $FW_PATH"
+            exit 1
+          fi
+
+      # 7. 上传构建产物
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpy_asr-${{ matrix.board }}${{ matrix.variant && format('_{0}', matrix.variant) || '' }}_${{ matrix.flash_size }}MB
+          path: ${{ env.ARTIFACTS_DIR }}/*.bin
