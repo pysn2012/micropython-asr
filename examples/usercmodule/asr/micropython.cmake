@@ -37,6 +37,4 @@ target_compile_definitions(usermod_K10_asr INTERFACE
 # 链接到主用户模块
 target_link_libraries(usermod INTERFACE usermod_K10_asr)
 
-target_link_libraries(usermod_K10_asr INTERFACE heap)
-
 
