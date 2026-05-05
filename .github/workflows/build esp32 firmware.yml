@@ -78,7 +78,7 @@ jobs:
           make BOARD=${{ matrix.board }} \
                BOARD_VARIANT=${{ matrix.variant }} \
                FLASH_SIZE=${{ matrix.flash_size }}MB \
-               USER_C_MODULES="${{ github.workspace }}/micropython-asr/examples/usercmodule/asr/micropython.cmake" \
+               USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/asr/micropython.cmake" \
                -j$(nproc)
 
       # 6. 重命名并收集固件
