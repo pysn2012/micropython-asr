@@ -179,11 +179,11 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000), // 16kHz 采样率
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
-            .mclk =  (gpio_num_t)mlck,
-            .bclk =  (gpio_num_t)blck,  // I2S BCLK
-            .ws =  (gpio_num_t)lrck,    // I2S WS/LRCK
-            .dout =  (gpio_num_t)dout,
-            .din =  (gpio_num_t)dsin,   // I2S DATA IN
+			.mclk = GPIO_NUM_NC, 
+			.bclk = GPIO_NUM_NC,
+			.ws = GPIO_NUM_NC,
+			.dout = GPIO_NUM_NC,
+			.din = GPIO_NUM_NC,
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
@@ -192,6 +192,11 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
         },
     };
     std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT;
+	if (mlck != -1) gpio_cfg.mclk = (gpio_num_t)mlck;
+    if (blck != -1) gpio_cfg.bclk = (gpio_num_t)blck;
+    if (lrck != -1) gpio_cfg.ws   = (gpio_num_t)lrck;
+    if (dout != -1) gpio_cfg.dout = (gpio_num_t)dout;
+    if (dsin != -1) gpio_cfg.din  = (gpio_num_t)dsin;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));

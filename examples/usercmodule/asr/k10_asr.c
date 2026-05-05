@@ -26,7 +26,7 @@ void mp_print_asr(const char *fmt, ...) {
 }
 
 extern void create_asr(void);
-extern void init_asr(int time, int flag);
+extern void init_asr(int time, int flag, int blck, int lrck, int dsin, int dout, int mlck);
 extern void add_asr_command(int id, const char *command);
 extern void free_asr(void);
 extern void start_tts(void);
