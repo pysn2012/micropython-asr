@@ -75,7 +75,7 @@ jobs:
 
           # 添加 esp32-sr（适配 MicroPython）
           git clone https://github.com/espressif/esp-sr.git \
-            ${{ env.ESP_IDF_DIR }}/components/esp32-sr
+            ${{ env.ESP_IDF_DIR }}/components/esp-sr
 
       # 6. 编译固件
       - name: 编译固件
