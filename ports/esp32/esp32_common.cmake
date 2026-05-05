@@ -344,3 +344,11 @@ add_custom_command(
     VERBATIM
     COMMAND_EXPAND_LISTS
 )
+# 添加TTS语音数据文件到烧录参数中 
+set(tts_voice_data ${IDF_PATH}/components/esp-sr/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat)
+if(EXISTS ${tts_voice_data})
+    esptool_py_flash_to_partition(flash "voice_data" "${tts_voice_data}")
+    message(STATUS "TTS voice data will be flashed to voice_data partition: ${tts_voice_data}")
+else()
+    message(WARNING "TTS voice data file not found: ${tts_voice_data}")
+endif()
