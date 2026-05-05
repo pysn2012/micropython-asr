@@ -33,11 +33,11 @@ jobs:
 
     steps:
       # 1. 检出当前仓库
-      - name: Checkout repo
+      - name: 检出当前仓库
         uses: actions/checkout@v4
 
       # 2. 缓存 ESP-IDF 与 MicroPython
-      - name: Cache ESP-IDF and MicroPython
+      - name: 缓存 ESP-IDF
         id: cache_all
         uses: actions/cache@v4
         with:
@@ -49,7 +49,7 @@ jobs:
           key: mpy-asr-idf-${{ env.ESP_IDF_VERSION }}
 
       # 3. 安装系统依赖（仅在缓存未命中时）
-      - name: Install system dependencies
+      - name: 安装系统依赖
         if: steps.cache_all.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
@@ -58,7 +58,7 @@ jobs:
             cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
       # 4. 克隆并配置 ESP-IDF（仅在缓存未命中时）
-      - name: Clone & setup ESP-IDF
+      - name: 克隆并配置 ESP-IDF
         if: steps.cache_all.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 --branch ${{ env.ESP_IDF_VERSION }} \
@@ -71,10 +71,11 @@ jobs:
             ${{ env.ESP_IDF_DIR }}/components/esp32-sr
 
       # 5. 编译固件
-      - name: Build firmware
+      - name: 编译固件
         run: |
           source ${{ env.ESP_IDF_DIR }}/export.sh
           cd ${{ env.MICROPYTHON_DIR }}/ports/esp32
+          make submodules
           make BOARD=${{ matrix.board }} \
                BOARD_VARIANT=${{ matrix.variant }} \
                FLASH_SIZE=${{ matrix.flash_size }}MB \
@@ -82,7 +83,7 @@ jobs:
                -j$(nproc)
 
       # 6. 重命名并收集固件
-      - name: Rename firmware
+      - name: 重命名并收集固件
         run: |
           mkdir -p ${{ env.ARTIFACTS_DIR }}
           BOARD_NAME="${{ matrix.board }}"
@@ -98,7 +99,7 @@ jobs:
           fi
 
       # 7. 上传构建产物
-      - name: Upload artifact
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: mpy_asr-${{ matrix.board }}${{ matrix.variant && format('_{0}', matrix.variant) || '' }}_${{ matrix.flash_size }}MB
