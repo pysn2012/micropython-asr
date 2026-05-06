@@ -39,7 +39,7 @@ jobs:
       # 2. 缓存 ESP-IDF 与 MicroPython
       - name: 缓存 ESP-IDF
         id: cache_all
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ env.ESP_IDF_DIR }}
