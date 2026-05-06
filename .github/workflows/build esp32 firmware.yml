@@ -34,7 +34,7 @@ jobs:
     steps:
       # 1. 检出当前仓库
       - name: 检出当前仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 2. 缓存 ESP-IDF 与 MicroPython
       - name: 缓存 ESP-IDF
