@@ -810,7 +810,10 @@ static const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
 };
 static MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 6)
+// v5.5.6 在枚举尾部追加了 WIFI_AUTH_UNKNOWN（MAX 17 -> 18），老常量值不变
+_Static_assert(WIFI_AUTH_MAX == 18, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
+#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
 _Static_assert(WIFI_AUTH_MAX == 17, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
 #elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
 _Static_assert(WIFI_AUTH_MAX == 16, "Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h");
