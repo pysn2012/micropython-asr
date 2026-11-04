@@ -66,35 +66,65 @@ srmodel_list_t *models = NULL;
 
 static int wakeup_flag = 0;
 
+// 麦克风输入模式（init_asr 时确定）
+enum {
+    MIC_MODE_32BIT_MONO = 0,  // 独立总线 + 32bit 单声道（INMP441，K10 移位技巧）
+    MIC_MODE_16BIT_MONO,      // 独立总线 + 16bit 单声道（ES7210 等 codec 单独接）
+    MIC_MODE_16BIT_STEREO,    // 共享总线全双工（ES7210/ES8311 共用 BCLK/WS，掌机类硬件）
+};
+static int g_mic_mode = MIC_MODE_32BIT_MONO;
+static int g_mic_slot = 0;    // 共享 stereo 模式取哪个槽：0=左 1=右
+
 void feed_Task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = (esp_afe_sr_data_t*)arg;
     int audio_chunksize = afe_handle->get_feed_chunksize(afe_data);
-    int nch = afe_handle->get_feed_channel_num(afe_data);
-    int feed_channel = 2;
-    size_t samp_len_bytes = audio_chunksize * sizeof(int16_t) * feed_channel;
-    int samp_len = samp_len_bytes / (sizeof(int32_t));
-    int16_t *i2s_buff = (int16_t *)malloc(samp_len_bytes);
-    assert(i2s_buff);
+    int feed_channel = 2; // "MN" 输入格式：[麦克风, 未用通道]
+    // 读缓冲按最大需求分配：32bit 单声道与共享 stereo 模式均为 chunksize*4 字节
+    int16_t *i2s_buff = (int16_t *)malloc(audio_chunksize * 4);
+    int16_t *feed_buf = (int16_t *)malloc(audio_chunksize * feed_channel * sizeof(int16_t));
+    assert(i2s_buff && feed_buf);
     size_t r_bytes = 0;
-    
+
     while (1) {
         if (free_task == 1) {
             break;
         }
-        
-        i2s_channel_read(rx_handle, i2s_buff, samp_len_bytes, &r_bytes, portMAX_DELAY);
-          
-        int32_t *tmp_buff = (int32_t*)i2s_buff;
-        for (int i = 0; i < samp_len; i++) {
-            tmp_buff[i] = tmp_buff[i] >> 14; // 32:8为有效位， 8:0为低8位， 全为0， AFE的输入为16位语音数据，拿29：13位是为了对语音信号放大。
+
+        i2s_channel_read(rx_handle, i2s_buff, audio_chunksize * 4, &r_bytes, portMAX_DELAY);
+
+        if (g_mic_mode == MIC_MODE_32BIT_MONO) {
+            // INMP441：32bit 槽内有效位在 29:13，>>14 后原地变成
+            // [样本, 符号扩展] 交错的 chunksize*2 个 int16 —— 正好是
+            // [麦克风, 未用通道] 的 feed 布局（K10 移位技巧，同时完成增益放大）
+            int32_t *tmp_buff = (int32_t*)i2s_buff;
+            for (int i = 0; i < audio_chunksize; i++) {
+                tmp_buff[i] = tmp_buff[i] >> 14;
+            }
+            afe_handle->feed(afe_data, (int16_t*)tmp_buff);
+        } else if (g_mic_mode == MIC_MODE_16BIT_MONO) {
+            for (int i = 0; i < audio_chunksize; i++) {
+                feed_buf[2 * i]     = i2s_buff[i];
+                feed_buf[2 * i + 1] = 0;
+            }
+            afe_handle->feed(afe_data, feed_buf);
+        } else { // MIC_MODE_16BIT_STEREO
+            // [L,R] 交错，取 slot 指定的槽作为麦克风，另一槽未用
+            for (int i = 0; i < audio_chunksize; i++) {
+                feed_buf[2 * i]     = i2s_buff[2 * i + g_mic_slot];
+                feed_buf[2 * i + 1] = 0;
+            }
+            afe_handle->feed(afe_data, feed_buf);
         }
-        afe_handle->feed(afe_data, (int16_t*)tmp_buff);
         vTaskDelay(pdMS_TO_TICKS(1));
     }
     if (i2s_buff) {
         free(i2s_buff);
         i2s_buff = NULL;
+    }
+    if (feed_buf) {
+        free(feed_buf);
+        feed_buf = NULL;
     }
     vTaskDelete(NULL);
 }
@@ -168,19 +198,62 @@ void detect_Task(void *arg)
 }
 
 extern "C" __attribute__((weak)) void init_asr(int time, int flag,
-        int mic_blck, int mic_ws, int mic_din, int slot,
+        int mic_blck, int mic_ws, int mic_din, int slot, int mic_bits,
         int amp_blck, int amp_ws, int amp_dout) {
     wake_time = time;
     wake_flag = flag;
+    g_mic_slot = (slot == 1) ? 1 : 0;
 
-    // ---- RX：麦克风（INMP441），I2S0，32bit 单声道，16kHz ----
-    // INMP441 的 L/R 引脚接地 -> 数据在左槽；接高电平 -> 数据在右槽
+    // 共享总线检测：功放与麦克风共用 BCLK/WS（掌机类硬件，ES7210+ES8311 同一 I2S）
+    bool shared_bus = (amp_dout != -1 && amp_blck == mic_blck && amp_ws == mic_ws);
+
+    if (shared_bus) {
+        // ---- 共享总线全双工：单控制器 I2S0，tx/rx 共用同一 std 配置 ----
+        // 16bit 立体声 @16kHz，tx/rx 同配置保证 BCLK/WS 完全一致（K10 同构拓扑）。
+        // MCLK 不由固件输出——这类板卡的 MCLK 由 Python 侧 PWM 生成（256×fs）
+        g_mic_mode = MIC_MODE_16BIT_STEREO;
+        i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+        ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle));
+
+        i2s_std_config_t std_cfg = {
+            .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+            .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+            .gpio_cfg = {
+                .mclk = GPIO_NUM_NC,
+                .bclk = GPIO_NUM_NC,
+                .ws = GPIO_NUM_NC,
+                .dout = GPIO_NUM_NC,
+                .din = GPIO_NUM_NC,
+                .invert_flags = {
+                    .mclk_inv = false,
+                    .bclk_inv = false,
+                    .ws_inv = false,
+                },
+            },
+        };
+        if (mic_blck != -1) std_cfg.gpio_cfg.bclk = (gpio_num_t)mic_blck;
+        if (mic_ws  != -1) std_cfg.gpio_cfg.ws   = (gpio_num_t)mic_ws;
+        if (mic_din != -1) std_cfg.gpio_cfg.din  = (gpio_num_t)mic_din;
+        if (amp_dout != -1) std_cfg.gpio_cfg.dout = (gpio_num_t)amp_dout;
+        ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
+        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
+        ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
+        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+        return;
+    }
+
+    // ---- 独立总线 RX：麦克风，I2S0，16kHz，位宽由 mic_bits 决定 ----
+    // 32bit（默认，INMP441）：L/R 接地 -> 数据在左槽；接高电平 -> 数据在右槽
+    // 16bit（ES7210 等 codec 单独接总线）
+    g_mic_mode = (mic_bits == 16) ? MIC_MODE_16BIT_MONO : MIC_MODE_32BIT_MONO;
     i2s_chan_config_t rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, NULL, &rx_handle));
 
+    i2s_data_bit_width_t rx_bits = (mic_bits == 16) ? I2S_DATA_BIT_WIDTH_16BIT
+                                                    : I2S_DATA_BIT_WIDTH_32BIT;
     i2s_std_config_t rx_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(rx_bits, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = GPIO_NUM_NC,
             .bclk = GPIO_NUM_NC,
@@ -201,7 +274,7 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &rx_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
 
-    // ---- TX：功放（MAX98357A），I2S1，16bit 立体声（左右槽同数据），16kHz ----
+    // ---- 独立总线 TX：功放（MAX98357A），I2S1，16bit 立体声（左右槽同数据），16kHz ----
     // 立体声复制是为了兼容 SD 引脚的任意通道选择（左/右/(L+R)/2 都有声）
     // 未接功放时（amp_dout=-1，如 8MB 板只做识别）跳过，I2S1 不占用
     if (amp_dout != -1) {

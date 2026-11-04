@@ -26,7 +26,7 @@ void mp_print_asr(const char *fmt, ...) {
 }
 
 extern void create_asr(void);
-extern void init_asr(int time, int flag, int mic_blck, int mic_ws, int mic_din, int slot, int amp_blck, int amp_ws, int amp_dout);
+extern void init_asr(int time, int flag, int mic_blck, int mic_ws, int mic_din, int slot, int mic_bits, int amp_blck, int amp_ws, int amp_dout);
 extern void add_asr_command(int id, const char *command);
 extern void free_asr(void);
 extern void start_tts(void);
@@ -86,7 +86,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mp_start_asr_obj, mp_start_asr);
 static mp_obj_t mp_init_asr(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     // 定义参数列表
     enum { ARG_wake_time, ARG_wake_flag, ARG_mic_blck, ARG_mic_ws, ARG_mic_din,
-           ARG_slot, ARG_amp_blck, ARG_amp_ws, ARG_amp_dout };
+           ARG_slot, ARG_mic_bits, ARG_amp_blck, ARG_amp_ws, ARG_amp_dout };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_wake_time, MP_ARG_INT, {.u_int = 6000} },   // 唤醒后命令词超时 ms
         { MP_QSTR_wake_flag, MP_ARG_INT, {.u_int = 1} },      // 1=单次 2=连续
@@ -94,9 +94,10 @@ static mp_obj_t mp_init_asr(size_t n_args, const mp_obj_t *pos_args, mp_map_t *k
         { MP_QSTR_mic_ws,   MP_ARG_INT, {.u_int = -1} },      // 麦克风 WS
         { MP_QSTR_mic_din,  MP_ARG_INT, {.u_int = -1} },      // 麦克风 SD/DIN
         { MP_QSTR_slot,     MP_ARG_INT, {.u_int = 0} },       // 麦克风槽位 0=左 1=右（INMP441 L/R接地=左）
+        { MP_QSTR_mic_bits, MP_ARG_INT, {.u_int = 32} },      // 麦克风位宽：32=INMP441 16=ES7210等codec
         { MP_QSTR_amp_blck, MP_ARG_INT, {.u_int = -1} },      // 功放 BCLK
         { MP_QSTR_amp_ws,   MP_ARG_INT, {.u_int = -1} },      // 功放 LRC/WS
-        { MP_QSTR_amp_dout, MP_ARG_INT, {.u_int = -1} },      // 功放 DIN
+        { MP_QSTR_amp_dout, MP_ARG_INT, {.u_int = -1} },      // 功放 DIN（与mic同BCLK/WS时自动共享总线）
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -107,7 +108,7 @@ static mp_obj_t mp_init_asr(size_t n_args, const mp_obj_t *pos_args, mp_map_t *k
     cb_free_task = 0;
     init_asr(args[ARG_wake_time].u_int, args[ARG_wake_flag].u_int,
              args[ARG_mic_blck].u_int, args[ARG_mic_ws].u_int, args[ARG_mic_din].u_int,
-             args[ARG_slot].u_int,
+             args[ARG_slot].u_int, args[ARG_mic_bits].u_int,
              args[ARG_amp_blck].u_int, args[ARG_amp_ws].u_int, args[ARG_amp_dout].u_int);
 
     return mp_const_none;

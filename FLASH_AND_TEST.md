@@ -167,3 +167,34 @@ asr.free_asr()
 | model（srmodels） | 0x2B0000, 3000K | 0x810000, 3000K |
 | voice_data（TTS音色） | 无 | 0xC17000, 3890K |
 | vfs（用户文件系统） | 0x59E000, 1472K | 0xAFE000, 1024K |
+
+## 8. 小程掌机（ESP32_GENERIC_S3_XC16M）专用说明
+
+构建工作流：`build xiaocheng handheld firmware`（与主工作流分开，产物名带`XC16M`）。
+固件尺寸与16MB板一致（约16,498,431字节，srmodels+TTS音色均合并）。
+
+掌机音频硬件与前两节的INMP441/MAX98357A不同——**ES7210+ES8311双codec、收发共享I²S总线**：
+
+| 项目 | 掌机实测配置 |
+|---|---|
+| ES7210（收音，I²C 0x43） | DIN=GPIO18，16-bit，fs=MCLK/256 |
+| ES8311（播放，I²C 0x18） | DOUT=GPIO13，16-bit立体声 |
+| BCLK / WS（收发共享） | GPIO16 / GPIO17 |
+| MCLK | GPIO15，**Python侧PWM生成**（256×fs，16k识别用4.096MHz） |
+| XL9535（I²C 0x20） | I²C1：SCL=7/SDA=12；AUDIO_PWR=P1.4（先上电），AMP_EN=P0.3 |
+
+固件自动识别共享总线：`amp_blck==mic_blck && amp_ws==mic_ws`时切单控制器全双工
+（16-bit立体声@16k，tx/rx同配置）。
+
+识别测试脚本：工作空间`小程ESP32S3掌机/asr_test.py`（含XL9535上电、MCLK PWM、
+ES7210寄存器初始化、命令词识别全流程）。
+
+```python
+asr.init_asr(wake_time=6000, wake_flag=1,
+             mic_blck=16, mic_ws=17, mic_din=18, slot=0, mic_bits=16,
+             amp_blck=16, amp_ws=17, amp_dout=13)
+```
+
+- `mic_bits=16`：ES7210是16-bit输出，必须显式指定（默认32对应INMP441）
+- 共享stereo模式下`slot`指取左右槽哪一路作麦克风（ES7210实际输出槽位以实测为准，无反应就换1）
+- ES8311播放/TTS需其时钟分频寄存器匹配16kHz（原寄存器表按24kHz配置），待后续实测调整
