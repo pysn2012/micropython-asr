@@ -1,4 +1,5 @@
 # 创建用户模块库
+set(ESP_SR_DIR $ENV{ESP_SR_COMPONENT_DIR})
 add_library(usermod_K10_asr INTERFACE)
 
 # 添加源文件
@@ -10,11 +11,11 @@ target_sources(usermod_K10_asr INTERFACE
 # 设置包含目录
 target_include_directories(usermod_K10_asr INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
-    ${IDF_PATH}/components/esp-sr
-    ${IDF_PATH}/components/esp-sr/include/esp32s3
-    ${IDF_PATH}/components/esp-sr/src/include
+    ${ESP_SR_DIR}
+    ${ESP_SR_DIR}/include/esp32s3
+    ${ESP_SR_DIR}/src/include
     ${IDF_PATH}/components/json/cJSON
-    ${IDF_PATH}/components/esp-sr/esp-tts/esp_tts_chinese/include
+    ${ESP_SR_DIR}/esp-tts/esp_tts_chinese/include
 )
 
 # 启用C++异常和RTTI - 只对C++文件

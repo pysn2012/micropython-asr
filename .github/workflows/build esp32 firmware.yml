@@ -12,6 +12,7 @@ concurrency:
 env:
   MICROPYTHON_DIR: ${{ github.workspace }}
   ESP_IDF_DIR: ${{ github.workspace }}/esp-idf
+  ESP_SR_COMPONENT_DIR: ${{ github.workspace }}/esp-sr
   ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
   # esp-idf版本，不建议修改（v5.5.6 与 ESP-VISION 官方编译矩阵一致，便于后续合并视觉能力）
   ESP_IDF_VERSION: v5.5.6
@@ -76,8 +77,10 @@ jobs:
 
           # 添加 esp-sr（适配 MicroPython）。注意：esp-sr 仓库 v2.1 起不再打 git tag，
           # 版本只发 Component Registry，master 即最新发布版（当前 2.6.1，API 已逐符号核对兼容）
+          # 克隆到工作区而非 IDF_PATH/components：IDF_PATH 里的组件对 bootloader 子构建也可见，
+          # 其 idf_component.yml 会把 bootloader 的组件管理器搞乱（esp_psram 头文件路径丢失）
           git clone --depth 1 https://github.com/espressif/esp-sr.git \
-            ${{ env.ESP_IDF_DIR }}/components/esp-sr
+            ${{ env.ESP_SR_COMPONENT_DIR }}
 
       # 6. 编译固件
       - name: 编译固件

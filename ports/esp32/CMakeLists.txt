@@ -59,6 +59,14 @@ endforeach()
 configure_file(${CMAKE_BINARY_DIR}/sdkconfig.combined.in ${CMAKE_BINARY_DIR}/sdkconfig.combined COPYONLY)
 set(SDKCONFIG_DEFAULTS ${CMAKE_BINARY_DIR}/sdkconfig.combined)
 
+# ESP-SR 组件（可选）。通过环境变量 ESP_SR_COMPONENT_DIR 指定其路径。
+# 注意：绝不要把 esp-sr 放进 IDF_PATH/components——IDF_PATH 里的组件对 bootloader
+# 子构建也可见，esp-sr 的 idf_component.yml 会把 bootloader 的组件依赖求解搞乱，
+# 导致 bootloader 编译 esp_memory_utils.c 时找不到 esp_private/esp_psram_extram.h。
+if(DEFINED ENV{ESP_SR_COMPONENT_DIR})
+    list(APPEND EXTRA_COMPONENT_DIRS $ENV{ESP_SR_COMPONENT_DIR})
+endif()
+
 # Include main IDF cmake file.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 

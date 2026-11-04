@@ -202,6 +202,11 @@ if($ENV{IDF_VERSION} VERSION_GREATER_EQUAL "5.4")
         esp_driver_touch_sens)
 endif()
 
+# ESP-SR 作为项目组件挂载（见顶层 CMakeLists.txt 的说明），main 需要它的头文件与预编译库
+if(DEFINED ENV{ESP_SR_COMPONENT_DIR})
+    list(APPEND IDF_COMPONENTS esp-sr)
+endif()
+
 # Provide the default LD fragment if not set
 if (MICROPY_USER_LDFRAGMENTS)
     set(MICROPY_LDFRAGMENTS ${MICROPY_USER_LDFRAGMENTS})
@@ -347,8 +352,8 @@ add_custom_command(
 # 添加TTS语音数据文件到烧录参数中
 # 仅当分区表中存在 voice_data 分区时才挂烧录（8MB 分区表没有该分区，直接挂会报
 # "Could not find offset of partition voice_data" 导致配置失败）
-set(tts_voice_data ${IDF_PATH}/components/esp-sr/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat)
-if(EXISTS ${tts_voice_data})
+set(tts_voice_data $ENV{ESP_SR_COMPONENT_DIR}/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat)
+if(DEFINED ENV{ESP_SR_COMPONENT_DIR} AND EXISTS ${tts_voice_data})
     set(_sr_parts_csv "${MICROPY_PORT_DIR}/${CONFIG_PARTITION_TABLE_CUSTOM_FILENAME}")
     if(EXISTS ${_sr_parts_csv})
         file(READ ${_sr_parts_csv} _sr_parts_content)
