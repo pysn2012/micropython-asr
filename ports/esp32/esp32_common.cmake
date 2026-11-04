@@ -344,11 +344,21 @@ add_custom_command(
     VERBATIM
     COMMAND_EXPAND_LISTS
 )
-# 添加TTS语音数据文件到烧录参数中 
+# 添加TTS语音数据文件到烧录参数中
+# 仅当分区表中存在 voice_data 分区时才挂烧录（8MB 分区表没有该分区，直接挂会报
+# "Could not find offset of partition voice_data" 导致配置失败）
 set(tts_voice_data ${IDF_PATH}/components/esp-sr/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat)
 if(EXISTS ${tts_voice_data})
-    esptool_py_flash_to_partition(flash "voice_data" "${tts_voice_data}")
-    message(STATUS "TTS voice data will be flashed to voice_data partition: ${tts_voice_data}")
+    set(_sr_parts_csv "${MICROPY_PORT_DIR}/${CONFIG_PARTITION_TABLE_CUSTOM_FILENAME}")
+    if(EXISTS ${_sr_parts_csv})
+        file(READ ${_sr_parts_csv} _sr_parts_content)
+        if(_sr_parts_content MATCHES "voice_data")
+            esptool_py_flash_to_partition(flash "voice_data" "${tts_voice_data}")
+            message(STATUS "TTS voice data will be flashed to voice_data partition: ${tts_voice_data}")
+        else()
+            message(STATUS "TTS voice data skipped: no voice_data partition in ${CONFIG_PARTITION_TABLE_CUSTOM_FILENAME}")
+        endif()
+    endif()
 else()
     message(WARNING "TTS voice data file not found: ${tts_voice_data}")
 endif()

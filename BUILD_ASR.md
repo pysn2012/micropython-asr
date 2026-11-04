@@ -33,4 +33,7 @@ esptool.py --chip esp32s3 --port COM口 write_flash 0x2B0000 srmodels.bin
 
 - 唤醒词 `wn9_hilexin`（Hi,乐鑫）+ 命令词 `mn7_cn` 量化 + WebRTC VAD
 - esp-sr 预编译库要求：ICache 32KB / DCache 64KB / 64B line
-- esp-sr v2.0.0 由 CI 克隆进 `$IDF_PATH/components/esp-sr`（非组件管理器路线）
+- esp-sr v2.6.1 由 CI 克隆进 `$IDF_PATH/components/esp-sr`（非组件管理器路线）
+- 构建矩阵：ESP-IDF v5.5.6（与 ESP-VISION 官方一致，便于后续合并视觉）
+- 音频硬件：C 模块只管 I²S 总线（引脚全参数化）；INMP441/MAX98357A 零配置，
+  ES7210/ES8311 等 I²C codec 由 Python 侧驱动先初始化再 `asr.init()`
