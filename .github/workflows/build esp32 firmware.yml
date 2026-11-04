@@ -74,8 +74,9 @@ jobs:
           git -C ${{ env.ESP_IDF_DIR }} submodule update --init --recursive --filter=tree:0
           ${{ env.ESP_IDF_DIR }}/install.sh esp32,esp32s3,esp32c3
 
-          # 添加 esp32-sr（适配 MicroPython，v2.6.1：WakeNet10/MultiNet7，API 已核对兼容）
-          git clone --branch v2.6.1 --depth 1 https://github.com/espressif/esp-sr.git \
+          # 添加 esp-sr（适配 MicroPython）。注意：esp-sr 仓库 v2.1 起不再打 git tag，
+          # 版本只发 Component Registry，master 即最新发布版（当前 2.6.1，API 已逐符号核对兼容）
+          git clone --depth 1 https://github.com/espressif/esp-sr.git \
             ${{ env.ESP_IDF_DIR }}/components/esp-sr
 
       # 6. 编译固件
