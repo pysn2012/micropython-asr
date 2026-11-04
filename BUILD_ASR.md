@@ -32,18 +32,18 @@ esptool.py --chip esp32s3 --port COM口 --baud 921600 write_flash 0x0 ESP32_GENE
 
 ## 使用（REPL 示例，立创 ESP32-S3 + INMP441 + MAX98357A）
 
-接线（双 I²S 控制器，收发时钟独立）：
+接线（双 I²S 控制器，收发时钟独立；**8MB 板不接功放也可用**，MAX98357A 仅 TTS 需要）：
 
 | 模块 | 引脚 | GPIO |
 |---|---|---|
 | INMP441 | SCK / WS / SD | 16 / 17 / 18 |
 | INMP441 | L/R | GND（→ 左槽，slot=0 默认） |
-| MAX98357A | BCLK / LRC / DIN | 39 / 40 / 38 |
+| MAX98357A | BCLK / LRC / DIN | 39 / 40 / 38（仅 16MB 板需要） |
 
 ```python
 import asr, time
 
-# 引脚全参数化，按板卡自由配置
+# 引脚全参数化，按板卡自由配置；未接功放时省略 amp_* 参数
 asr.init_asr(wake_time=6000, wake_flag=1,
              mic_blck=16, mic_ws=17, mic_din=18, slot=0,
              amp_blck=39, amp_ws=40, amp_dout=38)

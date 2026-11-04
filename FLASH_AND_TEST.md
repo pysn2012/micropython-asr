@@ -41,19 +41,30 @@ esptool.py --chip esp32s3 --port COM口 --baud 921600 write_flash 0x810000 新�
 
 双I²S控制器架构：I2S0收麦克风（32bit单声道），I2S1发功放（16bit立体声），收发时钟完全独立，引脚全参数化。
 
-| 模块 | 引脚 | 接ESP32-S3 | 备注 |
-|---|---|---|---|
-| INMP441 | VDD / GND | 3.3V / GND | |
-| INMP441 | L/R | **GND** | 数据走左槽，对应`slot=0`（默认） |
-| INMP441 | SCK | GPIO16 | BCLK |
-| INMP441 | WS | GPIO17 | 字选择 |
-| INMP441 | SD | GPIO18 | 数据输出 |
-| MAX98357A | VIN / GND | 5V / GND | |
-| MAX98357A | BCLK | GPIO39 | 与麦克风不共用 |
-| MAX98357A | LRC | GPIO40 | 字选择 |
-| MAX98357A | DIN | GPIO38 | 数据输入 |
-| MAX98357A | SD / GAIN | 悬空 | SD悬空=(L+R)/2输出；TX左右槽同数据，任意选择都有声 |
+**8MB板（只做唤醒+命令词识别）只需要INMP441，MAX98357A可以不接**——识别纯靠收音；TTS播报只在16MB板有，需要出声才接功放。
+
+### INMP441麦克风（8MB/16MB板都必接）
+
+| 引脚 | 接ESP32-S3 | 备注 |
+|---|---|---|
+| VDD / GND | 3.3V / GND | |
+| L/R | **GND** | 数据走左槽，对应`slot=0`（默认） |
+| SCK | GPIO16 | BCLK |
+| WS | GPIO17 | 字选择 |
+| SD | GPIO18 | 数据输出 |
+
+### MAX98357A功放（仅16MB板需要，8MB板可省略）
+
+| 引脚 | 接ESP32-S3 | 备注 |
+|---|---|---|
+| VIN / GND | 5V / GND | |
+| BCLK | GPIO39 | 与麦克风不共用 |
+| LRC | GPIO40 | 字选择 |
+| DIN | GPIO38 | 数据输入 |
+| SD / GAIN | 悬空 | SD悬空=(L+R)/2输出；TX左右槽同数据，任意选择都有声 |
 | 扬声器 | + / - | MAX98357A输出 | 4Ω/8Ω 2~3W |
+
+不接功放时`init_asr()`省略全部amp参数即可，固件内部不占用I2S1。
 
 ## 4. REPL测试流程
 
@@ -68,9 +79,19 @@ dir(asr)
 
 ### 第二步：初始化并启动
 
+8MB板（未接功放，省略amp参数）：
+
 ```python
 import asr, time
 
+asr.init_asr(wake_time=6000, wake_flag=1,
+             mic_blck=16, mic_ws=17, mic_din=18, slot=0)
+asr.start_asr()
+```
+
+16MB板（接了功放，带amp参数）：
+
+```python
 asr.init_asr(wake_time=6000, wake_flag=1,
              mic_blck=16, mic_ws=17, mic_din=18, slot=0,
              amp_blck=39, amp_ws=40, amp_dout=38)
@@ -107,7 +128,7 @@ asr.start_tts()
 asr.add_tts_data("你好，我是小乐")
 ```
 
-8MB板无voice_data分区，`start_tts()`会提示无法映射分区，属预期行为。
+8MB板无voice_data分区（也无功放），`start_tts()`会提示`voice_data partition not found`，属预期行为。
 
 ### 测完释放资源
 
@@ -123,7 +144,7 @@ asr.free_asr()
 | `wake_flag` | 1 | 1=单次识别，2=连续识别 |
 | `mic_blck` / `mic_ws` / `mic_din` | -1 | 麦克风BCLK/WS/数据引脚（GPIO号） |
 | `slot` | 0 | 麦克风槽位：0=左槽（INMP441的L/R接地），1=右槽（L/R接高电平） |
-| `amp_blck` / `amp_ws` / `amp_dout` | -1 | 功放BCLK/WS/数据引脚（GPIO号） |
+| `amp_blck` / `amp_ws` / `amp_dout` | -1 | 功放BCLK/WS/数据引脚（GPIO号）；**未接功放可全部省略**，固件不占用I2S1 |
 
 换任何板卡只需改这几个参数，固件不锁引脚。ES7210/ES8311等I²C codec板卡：先用Python侧驱动初始化codec，再调`asr.init_asr()`。
 
@@ -135,7 +156,7 @@ asr.free_asr()
 | `start_asr()`模型加载失败 | srmodels没烧上：整包重烧`write_flash 0x0 固件.bin` |
 | 喊唤醒词无反应，REPL正常 | ①确认唤醒词是"Hi,乐鑫"；②`slot`参数与INMP441的L/R接法不匹配（接地=0，接高=1）对调试试；③说话距离拉近、音量加大（增益偏小的备选：C代码feed路径移位`>>14`改小） |
 | 命令词添加报错 | 命令词必须在`start_asr()`之后添加；命令词2~5个字 |
-| 完全无声 | 检查功放BCLK/LRC/DIN三线与5V供电；SD悬空勿接地（接地=关断） |
+| 完全无声（16MB板） | 检查功放BCLK/LRC/DIN三线与5V供电；SD悬空勿接地（接地=关断）；确认`init_asr()`带了amp参数 |
 | 识别误触发多 | 提高`wake_time`没有用，属环境噪声/阈值问题：远离噪声源，或缩短`wake_time` |
 
 ## 7. 分区布局参考

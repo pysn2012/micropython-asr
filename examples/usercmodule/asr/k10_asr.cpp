@@ -203,30 +203,33 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
 
     // ---- TX：功放（MAX98357A），I2S1，16bit 立体声（左右槽同数据），16kHz ----
     // 立体声复制是为了兼容 SD 引脚的任意通道选择（左/右/(L+R)/2 都有声）
-    i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle, NULL));
+    // 未接功放时（amp_dout=-1，如 8MB 板只做识别）跳过，I2S1 不占用
+    if (amp_dout != -1) {
+        i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+        ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle, NULL));
 
-    i2s_std_config_t tx_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
-        .gpio_cfg = {
-            .mclk = GPIO_NUM_NC,
-            .bclk = GPIO_NUM_NC,
-            .ws = GPIO_NUM_NC,
-            .dout = GPIO_NUM_NC,
-            .din = GPIO_NUM_NC,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
+        i2s_std_config_t tx_cfg = {
+            .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+            .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+            .gpio_cfg = {
+                .mclk = GPIO_NUM_NC,
+                .bclk = GPIO_NUM_NC,
+                .ws = GPIO_NUM_NC,
+                .dout = GPIO_NUM_NC,
+                .din = GPIO_NUM_NC,
+                .invert_flags = {
+                    .mclk_inv = false,
+                    .bclk_inv = false,
+                    .ws_inv = false,
+                },
             },
-        },
-    };
-    if (amp_blck != -1) tx_cfg.gpio_cfg.bclk = (gpio_num_t)amp_blck;
-    if (amp_ws   != -1) tx_cfg.gpio_cfg.ws   = (gpio_num_t)amp_ws;
-    if (amp_dout != -1) tx_cfg.gpio_cfg.dout = (gpio_num_t)amp_dout;
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_cfg));
-    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+        };
+        if (amp_blck != -1) tx_cfg.gpio_cfg.bclk = (gpio_num_t)amp_blck;
+        if (amp_ws   != -1) tx_cfg.gpio_cfg.ws   = (gpio_num_t)amp_ws;
+        tx_cfg.gpio_cfg.dout = (gpio_num_t)amp_dout;
+        ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_cfg));
+        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+    }
 }
 
 // 音频采集任务
@@ -272,6 +275,9 @@ extern "C" __attribute__((weak)) void free_asr(void){
 esp_err_t bsp_audio_play(const int16_t* data, int length)
 {
     // length 为字节数；TX 为 16bit 立体声，每个采样复制到左右两个槽
+    if (!tx_handle) {
+        return ESP_ERR_INVALID_STATE; // 未接功放（init_asr 时省略 amp 参数）
+    }
     int nsamp = length / (int)sizeof(int16_t);
     int16_t *out = (int16_t*)malloc(nsamp * 2 * sizeof(int16_t));
     if (!out) {
@@ -317,6 +323,11 @@ void tts_Task(void *arg)
 extern "C" __attribute__((weak)) void start_tts(void){
     // 1. 初始化TTS
     const esp_partition_t* part=esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "voice_data");
+    if (part == NULL) {
+        // 8MB 板无 voice_data 分区，属预期情况
+        mp_print_asr("voice_data partition not found (TTS unavailable)\n");
+        return;
+    }
     void* voicedata;
     esp_partition_mmap_handle_t mmap;
     esp_err_t err=esp_partition_mmap(part, 0, part->size, ESP_PARTITION_MMAP_DATA, (const void**)&voicedata, &mmap);
