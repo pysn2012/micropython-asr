@@ -82,12 +82,30 @@ files_in = [
     ("application", offset_application, max_size_application, arg_application_bin),
 ]
 
-# Add additional bin files if provided
+# Add additional bin files if provided.
+# Offsets are looked up from the actual partition table by partition name,
+# so the same Makefile works for any flash size (8MB board has no voice_data
+# partition -> TTS data is skipped automatically).
+def find_partition(table, name):
+    for part in table:
+        if part.name == name:
+            return part
+    return None
+
+
 if arg_srmodels_bin and os.path.exists(arg_srmodels_bin):
-    files_in.append(("srmodels", 0x810000, 0x400000, arg_srmodels_bin))  # 4MB max size for srmodels
+    part = find_partition(partition_table, "model")
+    if part is not None:
+        files_in.append(("srmodels", part.offset, part.size, arg_srmodels_bin))
+    else:
+        print("WARNING: srmodels provided but no 'model' partition found, skipped")
 
 if arg_esp_tts_data and os.path.exists(arg_esp_tts_data):
-    files_in.append(("esp_tts_data", 0xc17000, 0x3e9000, arg_esp_tts_data))  # ~4MB max size for TTS data
+    part = find_partition(partition_table, "voice_data")
+    if part is not None:
+        files_in.append(("esp_tts_data", part.offset, part.size, arg_esp_tts_data))
+    else:
+        print("WARNING: TTS data provided but no 'voice_data' partition found, skipped")
 
 file_out = arg_output_bin
 

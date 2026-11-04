@@ -39,6 +39,10 @@ BAUD_ARG := -b $(BAUD)
 endif
 DEVICE += $(PORT_ARG) $(BAUD_ARG)
 
+# esp-sr 组件目录：CI/本地构建通过环境变量传入（esp-sr 不放 IDF_PATH/components）
+# 回退到旧的 IDF_PATH 内路径仅为兼容
+ESP_SR_COMPONENT_DIR ?= ../../../esp-idf/components/esp-sr
+
 PYTHON ?= python3
  
 .PHONY: all clean deploy flash-firmware erase submodules copy_modules FORCE 
@@ -91,7 +95,7 @@ all:
 		$(BUILD)/firmware.bin \
 		$(BUILD)/micropython.uf2 \
 		$(BUILD)/srmodels/srmodels.bin \
-		../../../esp-idf/components/esp-sr/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat
+		$(ESP_SR_COMPONENT_DIR)/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat
 
 #$(call RUN_IDF_PY,$(DEVICE) flash)
 

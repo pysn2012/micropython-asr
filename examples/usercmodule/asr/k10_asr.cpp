@@ -167,23 +167,26 @@ void detect_Task(void *arg)
     vTaskDelete(NULL);
 }
 
-extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int lrck, int dsin, int dout, int mlck) {
+extern "C" __attribute__((weak)) void init_asr(int time, int flag,
+        int mic_blck, int mic_ws, int mic_din, int slot,
+        int amp_blck, int amp_ws, int amp_dout) {
     wake_time = time;
     wake_flag = flag;
-    // I2S 配置
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, &rx_handle));
-    
-    // I2S 标准模式配置
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000), // 16kHz 采样率
+
+    // ---- RX：麦克风（INMP441），I2S0，32bit 单声道，16kHz ----
+    // INMP441 的 L/R 引脚接地 -> 数据在左槽；接高电平 -> 数据在右槽
+    i2s_chan_config_t rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, NULL, &rx_handle));
+
+    i2s_std_config_t rx_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
-			.mclk = GPIO_NUM_NC, 
-			.bclk = GPIO_NUM_NC,
-			.ws = GPIO_NUM_NC,
-			.dout = GPIO_NUM_NC,
-			.din = GPIO_NUM_NC,
+            .mclk = GPIO_NUM_NC,
+            .bclk = GPIO_NUM_NC,
+            .ws = GPIO_NUM_NC,
+            .dout = GPIO_NUM_NC,
+            .din = GPIO_NUM_NC,
             .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
@@ -191,15 +194,38 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag, int blck, int
             },
         },
     };
-    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT;
-	if (mlck != -1) std_cfg.gpio_cfg.mclk = (gpio_num_t)mlck;
-    if (blck != -1) std_cfg.gpio_cfg.bclk = (gpio_num_t)blck;
-    if (lrck != -1) std_cfg.gpio_cfg.ws   = (gpio_num_t)lrck;
-    if (dout != -1) std_cfg.gpio_cfg.dout = (gpio_num_t)dout;
-    if (dsin != -1) std_cfg.gpio_cfg.din  = (gpio_num_t)dsin;
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
+    rx_cfg.slot_cfg.slot_mask = (slot == 1) ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT;
+    if (mic_blck != -1) rx_cfg.gpio_cfg.bclk = (gpio_num_t)mic_blck;
+    if (mic_ws  != -1) rx_cfg.gpio_cfg.ws   = (gpio_num_t)mic_ws;
+    if (mic_din != -1) rx_cfg.gpio_cfg.din  = (gpio_num_t)mic_din;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &rx_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
+
+    // ---- TX：功放（MAX98357A），I2S1，16bit 立体声（左右槽同数据），16kHz ----
+    // 立体声复制是为了兼容 SD 引脚的任意通道选择（左/右/(L+R)/2 都有声）
+    i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle, NULL));
+
+    i2s_std_config_t tx_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = {
+            .mclk = GPIO_NUM_NC,
+            .bclk = GPIO_NUM_NC,
+            .ws = GPIO_NUM_NC,
+            .dout = GPIO_NUM_NC,
+            .din = GPIO_NUM_NC,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+    if (amp_blck != -1) tx_cfg.gpio_cfg.bclk = (gpio_num_t)amp_blck;
+    if (amp_ws   != -1) tx_cfg.gpio_cfg.ws   = (gpio_num_t)amp_ws;
+    if (amp_dout != -1) tx_cfg.gpio_cfg.dout = (gpio_num_t)amp_dout;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &tx_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
 }
 
@@ -245,22 +271,19 @@ extern "C" __attribute__((weak)) void free_asr(void){
 
 esp_err_t bsp_audio_play(const int16_t* data, int length)
 {
-    size_t bytes_write = 0;
-    esp_err_t ret = ESP_OK;
-    size_t bytes_written = 0;
-    int out_length= length;
-
-    int *data_out = NULL;
-
-    out_length = length * 2;
-    data_out = (int*)malloc(out_length);
-    for (int i = 0; i < length / sizeof(int16_t); i++) {
-        int ret = data[i];
-        data_out[i] = ret << 16;
+    // length 为字节数；TX 为 16bit 立体声，每个采样复制到左右两个槽
+    int nsamp = length / (int)sizeof(int16_t);
+    int16_t *out = (int16_t*)malloc(nsamp * 2 * sizeof(int16_t));
+    if (!out) {
+        return ESP_ERR_NO_MEM;
     }
-
-    ret = i2s_channel_write(tx_handle, data_out, out_length, &bytes_written, portMAX_DELAY);
-    free(data_out);
+    for (int i = 0; i < nsamp; i++) {
+        out[2 * i]     = data[i]; // 左槽
+        out[2 * i + 1] = data[i]; // 右槽
+    }
+    size_t bytes_write = 0;
+    esp_err_t ret = i2s_channel_write(tx_handle, out, nsamp * 2 * sizeof(int16_t), &bytes_write, portMAX_DELAY);
+    free(out);
     return ret;
 }
 
