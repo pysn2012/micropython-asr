@@ -4,5 +4,5 @@ set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
     boards/sdkconfig.ble
     boards/sdkconfig.spiram_sx
-    boards/ESP32_GENERIC_S3/sdkconfig.board
+    boards/ESP32_GENERIC_S3_ASR16M/sdkconfig.board
 )
