@@ -1,0 +1,12 @@
+﻿# 8MB flash layout for ESP-SR + MicroPython (ESP32_GENERIC_S3 / N8R8)
+# model 分区放 srmodels.bin（WakeNet9 + MultiNet7 量化模型，约 2.5MB 内）
+# 注意：8MB flash 放不下中文 TTS 音色数据（~3.9MB），voice_data 分区暂不保留
+# Notes: the offset of the partition table itself is set in
+# $IDF_PATH/components/partition_table/Kconfig.projbuild.
+# Name,      Type, SubType, Offset,     Size
+nvs,        data, nvs,      0x9000,   0x6000
+phy_init,   data, phy,      0xf000,   0x1000
+factory,    app,  factory,  0x10000,  0x2A0000
+model,      data, spiffs,   0x2B0000, 3000K
+vfs,        data, fat,      0x59E000, 0x170000
+coredump,   data, coredump, ,         1K

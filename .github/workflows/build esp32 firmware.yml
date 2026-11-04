@@ -26,9 +26,6 @@ jobs:
         include:
           - board: ESP32_GENERIC_S3
             variant: SPIRAM_OCT
-            flash_size: 16
-          - board: ESP32_GENERIC_S3
-            variant: SPIRAM_OCT
             flash_size: 8
 
     steps:
@@ -36,7 +33,7 @@ jobs:
       - name: 检出当前仓库
         uses: actions/checkout@v4
 
-      # 2. 缓存 ESP-IDF 与 MicroPython
+      # 2. 缓存 ESP-IDF（只缓存工具链，不缓存源码——否则缓存命中会用旧源码覆盖新提交）
       - name: 缓存 ESP-IDF
         id: cache_all
         uses: actions/cache@v4
@@ -45,7 +42,6 @@ jobs:
             ${{ env.ESP_IDF_DIR }}
             ~/.espressif/
             ~/.cache/pip/
-            ${{ env.MICROPYTHON_DIR }}
           key: mpy-asr-idf-${{ env.ESP_IDF_VERSION }}
 
       # 3. 安装系统依赖（仅在缓存未命中时）
@@ -101,6 +97,17 @@ jobs:
             cp "$FW_PATH" "${{ env.ARTIFACTS_DIR }}/$OUT_NAME"
           else
             echo "Firmware not found at $FW_PATH"
+            exit 1
+          fi
+
+          # 收集 esp-sr 模型包（srmodels_bin 目标随主构建自动生成）
+          SR_PATH="${{ env.MICROPYTHON_DIR }}/ports/esp32/build-${BOARD_NAME}/srmodels/srmodels.bin"
+          if [[ -f "$SR_PATH" ]]; then
+            cp "$SR_PATH" "${{ env.ARTIFACTS_DIR }}/srmodels.bin"
+            ls -la "${{ env.ARTIFACTS_DIR }}/"
+          else
+            echo "srmodels.bin not found at $SR_PATH"
+            find ${{ env.MICROPYTHON_DIR }}/ports/esp32/build-${BOARD_NAME} -name "*.bin" | head -20
             exit 1
           fi
 
