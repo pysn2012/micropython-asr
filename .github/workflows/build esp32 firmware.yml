@@ -24,9 +24,14 @@ jobs:
       matrix:
       # 开发板矩阵，可以添加不同的开发板
         include:
+          # 8MB Flash（N8R8，如立创 ESP32-S3）：唤醒+命令词，无 TTS
           - board: ESP32_GENERIC_S3
             variant: SPIRAM_OCT
             flash_size: 8
+          # 16MB Flash：全功能，含 TTS 播报
+          - board: ESP32_GENERIC_S3_ASR16M
+            variant: SPIRAM_OCT
+            flash_size: 16
 
     steps:
       # 1. 检出当前仓库
