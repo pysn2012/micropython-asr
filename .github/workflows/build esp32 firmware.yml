@@ -50,7 +50,15 @@ jobs:
             ~/.cache/pip/
           key: mpy-asr-idf-${{ env.ESP_IDF_VERSION }}
 
-      # 3. 安装系统依赖（仅在缓存未命中时）
+      # 3. 克隆 esp-sr（必须无条件执行：不进缓存，IDF 缓存命中时本步骤也不能跳过）
+      - name: 克隆 esp-sr
+        run: |
+          # esp-sr 仓库 v2.1 起不再打 git tag，版本只发 Component Registry，
+          # master 即最新发布版（当前 2.6.1，API 已逐符号核对兼容）
+          git clone --depth 1 https://github.com/espressif/esp-sr.git \
+            ${{ env.ESP_SR_COMPONENT_DIR }}
+
+      # 4. 安装系统依赖（仅在缓存未命中时）
       - name: 安装系统依赖
         if: steps.cache_all.outputs.cache-hit != 'true'
         run: |
@@ -59,14 +67,14 @@ jobs:
             git wget flex bison gperf python3 python3-pip python3-venv \
             cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-      # 4. 初始化MicroPython
+      # 5. 初始化MicroPython
       - name: 初始化MicroPython
         run: |
           cd ${{ env.MICROPYTHON_DIR }}
           git submodule update --init --depth 1
           make -C mpy-cross
 
-      # 5. 克隆并配置 ESP-IDF（仅在缓存未命中时）
+      # 6. 克隆并配置 ESP-IDF（仅在缓存未命中时）
       - name: 克隆并配置 ESP-IDF
         if: steps.cache_all.outputs.cache-hit != 'true'
         run: |
@@ -75,14 +83,7 @@ jobs:
           git -C ${{ env.ESP_IDF_DIR }} submodule update --init --recursive --filter=tree:0
           ${{ env.ESP_IDF_DIR }}/install.sh esp32,esp32s3,esp32c3
 
-          # 添加 esp-sr（适配 MicroPython）。注意：esp-sr 仓库 v2.1 起不再打 git tag，
-          # 版本只发 Component Registry，master 即最新发布版（当前 2.6.1，API 已逐符号核对兼容）
-          # 克隆到工作区而非 IDF_PATH/components：IDF_PATH 里的组件对 bootloader 子构建也可见，
-          # 其 idf_component.yml 会把 bootloader 的组件管理器搞乱（esp_psram 头文件路径丢失）
-          git clone --depth 1 https://github.com/espressif/esp-sr.git \
-            ${{ env.ESP_SR_COMPONENT_DIR }}
-
-      # 6. 编译固件
+      # 7. 编译固件
       - name: 编译固件
         run: |
           source ${{ env.ESP_IDF_DIR }}/export.sh
@@ -93,7 +94,7 @@ jobs:
                USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/asr/micropython.cmake" \
                -j$(nproc)
 
-      # 7. 重命名并收集固件
+      # 8. 重命名并收集固件
       - name: 重命名并收集固件
         run: |
           mkdir -p ${{ env.ARTIFACTS_DIR }}
@@ -120,7 +121,7 @@ jobs:
             exit 1
           fi
 
-      # 8. 上传构建产物
+      # 9. 上传构建产物
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
