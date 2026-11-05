@@ -152,8 +152,9 @@ asr.free_asr()
 
 | 现象 | 排查顺序 |
 |---|---|
+| 所有测试前 | 先跑 `import esp; esp.osdebug(False)` 打开INFO日志——默认固件只输出ERROR级，esp-sr的模型加载日志看不到 |
 | `import asr`报错 | 固件不含asr模块——确认烧的是本仓库CI产物 |
-| `start_asr()`模型加载失败 | srmodels没烧上：整包重烧`write_flash 0x0 固件.bin` |
+| `start_asr()`模型加载失败 | 串口看`[ASR]`输出：`model partition empty`说明srmodels没烧上（整包重烧`write_flash 0x0 固件.bin`）；`no chinese MN model`说明srmodels与sdkconfig不匹配 |
 | 喊唤醒词无反应，REPL正常 | ①确认唤醒词是"Hi,乐鑫"；②`slot`参数与INMP441的L/R接法不匹配（接地=0，接高=1）对调试试；③说话距离拉近、音量加大（增益偏小的备选：C代码feed路径移位`>>14`改小） |
 | 命令词添加报错 | 命令词必须在`start_asr()`之后添加；命令词2~5个字 |
 | 完全无声（16MB板） | 检查功放BCLK/LRC/DIN三线与5V供电；SD悬空勿接地（接地=关断）；确认`init_asr()`带了amp参数 |

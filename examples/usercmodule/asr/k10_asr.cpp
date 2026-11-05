@@ -80,6 +80,8 @@ void feed_Task(void *arg)
     esp_afe_sr_data_t *afe_data = (esp_afe_sr_data_t*)arg;
     int audio_chunksize = afe_handle->get_feed_chunksize(afe_data);
     int feed_channel = 2; // "MN" 输入格式：[麦克风, 未用通道]
+    mp_print_asr("[ASR] feed task started, chunksize=%d, mode=%d(0=32bit 1=16bit-mono 2=16bit-stereo)\n",
+                 audio_chunksize, g_mic_mode);
     // 读缓冲按最大需求分配：32bit 单声道与共享 stereo 模式均为 chunksize*4 字节
     int16_t *i2s_buff = (int16_t *)malloc(audio_chunksize * 4);
     int16_t *feed_buf = (int16_t *)malloc(audio_chunksize * feed_channel * sizeof(int16_t));
@@ -134,19 +136,29 @@ void detect_Task(void *arg)
     esp_afe_sr_data_t *afe_data = (esp_afe_sr_data_t*)arg;
     int afe_chunksize = afe_handle->get_fetch_chunksize(afe_data);
     char *mn_name = esp_srmodel_filter(models, ESP_MN_PREFIX, ESP_MN_CHINESE);
+    if (mn_name == NULL) {
+        // 无中文命令词模型：明确报错并退出任务，避免空指针崩溃
+        mp_print_asr("[ASR] ERROR: no chinese MN model! "
+                     "srmodels.bin does not match sdkconfig (expect mn7_cn)\n");
+        cb_free_task = 1;
+        vTaskDelete(NULL);
+        return;
+    }
+    mp_print_asr("[ASR] detect task started, mn=%s, chunksize=%d\n", mn_name, afe_chunksize);
     esp_mn_iface_t *multinet = esp_mn_handle_from_name(mn_name);
     model_iface_data_t *model_data = multinet->create(mn_name, wake_time);
     esp_mn_commands_alloc(multinet,model_data);
-    
+
     while (1) {
         if (free_task == 1) {
             break;
         }
-        afe_fetch_result_t* res = afe_handle->fetch(afe_data); 
+        afe_fetch_result_t* res = afe_handle->fetch(afe_data);
         if (!res || res->ret_value == ESP_FAIL) {
         }
 
         if (res->wakeup_state == WAKENET_DETECTED) {
+            mp_print_asr("[ASR] wake detected\n");
 	        multinet->clean(model_data);
         }
 
@@ -165,6 +177,7 @@ void detect_Task(void *arg)
 
             if (mn_state == ESP_MN_STATE_DETECTED) {
                 esp_mn_results_t *mn_result = multinet->get_results(model_data);
+                mp_print_asr("[ASR] command detected, id=%d\n", (int)mn_result->command_id[0]);
                 g_asr_data.audio_id = mn_result->command_id[0];
                 audio_push_result(&g_asr_data);
                 if (wake_flag == ASR_MODE_SINGLE) {
@@ -177,6 +190,7 @@ void detect_Task(void *arg)
 
             if (mn_state == ESP_MN_STATE_TIMEOUT) {
                 esp_mn_results_t *mn_result = multinet->get_results(model_data);
+                mp_print_asr("[ASR] command timeout (back to wake standby)\n");
                 afe_handle->enable_wakenet(afe_data);
                 wakeup_flag = 0;
                 continue;
@@ -203,9 +217,15 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
     wake_time = time;
     wake_flag = flag;
     g_mic_slot = (slot == 1) ? 1 : 0;
+    mp_print_asr("[ASR] init_asr: mic(bclk=%d, ws=%d, din=%d, slot=%d, bits=%d) "
+                 "amp(bclk=%d, ws=%d, dout=%d)\n",
+                 mic_blck, mic_ws, mic_din, slot, mic_bits,
+                 amp_blck, amp_ws, amp_dout);
 
     // 共享总线检测：功放与麦克风共用 BCLK/WS（掌机类硬件，ES7210+ES8311 同一 I2S）
     bool shared_bus = (amp_dout != -1 && amp_blck == mic_blck && amp_ws == mic_ws);
+    mp_print_asr("[ASR] bus: %s\n", shared_bus ? "shared full-duplex I2S0" :
+                 (amp_dout != -1 ? "independent (RX=I2S0, TX=I2S1)" : "RX only (I2S0)"));
 
     if (shared_bus) {
         // ---- 共享总线全双工：单控制器 I2S0，tx/rx 共用同一 std 配置 ----
@@ -309,6 +329,17 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
 extern "C" __attribute__((weak)) void create_asr(void) {
 
     models = esp_srmodel_init("model");
+    if (models == NULL || models->num == 0) {
+        // 模型分区缺失/为空：明确报错并退出，避免后续空指针崩溃
+        mp_print_asr("[ASR] ERROR: model partition empty! "
+                     "srmodels.bin not flashed or invalid\n");
+        return;
+    }
+    mp_print_asr("[ASR] models loaded: %d\n", models->num);
+    for (int i = 0; i < models->num; i++) {
+        mp_print_asr("  [ASR] model[%d]: %s\n", i, models->model_name[i]);
+    }
+
     afe_config_t *afe_config = afe_config_init("MN", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
     afe_handle = esp_afe_handle_from_config(afe_config);
     esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
