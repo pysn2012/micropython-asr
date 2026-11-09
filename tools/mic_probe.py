@@ -33,13 +33,13 @@ while got < BYTES:
 print("读取 %d 字节，耗时 %d ms" % (got, time.ticks_diff(time.ticks_ms(), t0)))
 i2s.deinit()
 
-a = memoryview(buf).cast('i')   # 按 int32 小端解析
+a = None
+import struct
 peak_l = peak_r = 0
 sum_l = sum_r = 0
-cnt = got // 8
-for i in range(0, got // 4 - 1, 2):
-    l = a[i]
-    r = a[i + 1]
+cnt = got // 8   # 立体声对数（L,R 各 4 字节 int32）
+for off in range(0, got - 8 + 1, 8):
+    l, r = struct.unpack_from('<ii', buf, off)
     if abs(l) > peak_l:
         peak_l = abs(l)
     if abs(r) > peak_r:
