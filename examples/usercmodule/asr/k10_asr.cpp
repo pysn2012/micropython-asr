@@ -404,12 +404,14 @@ extern "C" __attribute__((weak)) void add_asr_command(int id, const char *comman
                      "(命令词须在 start_asr 之后、模型 alloc 成功后添加)\n",
                      id, command, (int)ret);
     } else {
-        mp_print_asr("[ASR] command added: id=%d %s (total %d)\n",
-                     id, command, esp_mn_commands_num());
+        mp_print_asr("[ASR] command added: id=%d %s\n", id, command);
     }
-    ret = esp_mn_commands_update();
-    if (ret != ESP_OK) {
-        mp_print_asr("[ASR] commands_update FAILED ret=%d\n", (int)ret);
+    // 注意：esp_mn_commands_update 返回 esp_mn_error_t*（成功为 NULL），不是 esp_err_t。
+    // esp_mn_error_t 仅有 int16_t num 与 esp_mn_phrase_t **phrases 两个字段（esp_mn_iface.h L67-70）。
+    esp_mn_error_t *err = esp_mn_commands_update();
+    if (err != NULL) {
+        mp_print_asr("[ASR] commands_update FAILED: %d 个命令词未能写入模型\n", (int)err->num);
+        free(err);
     }
 }
 
