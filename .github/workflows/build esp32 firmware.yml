@@ -94,7 +94,25 @@ jobs:
                USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/asr/micropython.cmake" \
                -j$(nproc)
 
-      # 8. 重命名并收集固件
+      # 8. 构建失败时打印详细日志（idf.py 的真实错误在 log/ 目录里，默认不显示）
+      - name: 失败时打印构建日志
+        if: failure()
+        run: |
+          cd ${{ env.MICROPYTHON_DIR }}/ports/esp32
+          for f in build-*/log/idf_py_stderr_output_*; do
+            if [ -f "$f" ]; then
+              echo "==== $f ===="
+              tail -n 120 "$f" || true
+            fi
+          done
+          for f in build-*/log/idf_py_stdout_output_*; do
+            if [ -f "$f" ]; then
+              echo "==== $f ===="
+              tail -n 60 "$f" || true
+            fi
+          done
+
+      # 9. 重命名并收集固件
       - name: 重命名并收集固件
         run: |
           mkdir -p ${{ env.ARTIFACTS_DIR }}
@@ -121,7 +139,7 @@ jobs:
             exit 1
           fi
 
-      # 9. 上传构建产物
+      # 10. 上传构建产物
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
