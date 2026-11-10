@@ -89,6 +89,7 @@ void feed_Task(void *arg)
     size_t r_bytes = 0;
     int16_t *fed = NULL;      // 本轮实际喂给 AFE 的缓冲（用于电平统计）
     static int dbg_cnt = 0;   // 电平打印计数，约 1 秒一次
+    int short_reads = 0;      // I2S 短读计数（读不满=DMA欠载）
 
     while (1) {
         if (free_task == 1) {
@@ -96,6 +97,9 @@ void feed_Task(void *arg)
         }
 
         i2s_channel_read(rx_handle, i2s_buff, audio_chunksize * 4, &r_bytes, portMAX_DELAY);
+        if (r_bytes != (size_t)(audio_chunksize * 4)) {
+            short_reads++;
+        }
 
         if (g_mic_mode == MIC_MODE_32BIT_MONO) {
             // INMP441：32bit 槽内有效位在 29:13，>>14 后原地变成
@@ -133,7 +137,13 @@ void feed_Task(void *arg)
                 if (v < 0) v = -v;
                 if (v > peak) peak = v;
             }
-            mp_print_asr("[ASR] mic peak=%d\n", peak);
+            if (peak < 100) {
+                mp_print_asr("[ASR] mic peak=%d short_read=%d (无有效信号! 检查接线; "
+                             "数据可能在另一槽, init_asr 改 slot=1)\n", peak, short_reads);
+            } else {
+                mp_print_asr("[ASR] mic peak=%d short_read=%d\n", peak, short_reads);
+            }
+            short_reads = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -172,6 +182,12 @@ void detect_Task(void *arg)
         }
         afe_fetch_result_t* res = afe_handle->fetch(afe_data);
         if (!res || res->ret_value == ESP_FAIL) {
+            static int fetch_err_cnt = 0;
+            if (++fetch_err_cnt % 100 == 1) {
+                mp_print_asr("[ASR] fetch error! res=%d ret=%d\n",
+                             (int)(long)res, res ? (int)res->ret_value : -1);
+            }
+            continue;
         }
 
         if (res->wakeup_state == WAKENET_DETECTED) {
@@ -382,8 +398,19 @@ extern "C" __attribute__((weak)) void create_asr(void) {
 }
 
 extern "C" __attribute__((weak)) void add_asr_command(int id, const char *command){
-    esp_mn_commands_add(id,command);
-    esp_mn_commands_update();
+    esp_err_t ret = esp_mn_commands_add(id, command);
+    if (ret != ESP_OK) {
+        mp_print_asr("[ASR] add_asr_command(%d, %s) FAILED ret=%d "
+                     "(命令词须在 start_asr 之后、模型 alloc 成功后添加)\n",
+                     id, command, (int)ret);
+    } else {
+        mp_print_asr("[ASR] command added: id=%d %s (total %d)\n",
+                     id, command, esp_mn_commands_num());
+    }
+    ret = esp_mn_commands_update();
+    if (ret != ESP_OK) {
+        mp_print_asr("[ASR] commands_update FAILED ret=%d\n", (int)ret);
+    }
 }
 
 extern "C" __attribute__((weak)) void free_asr(void){
