@@ -87,6 +87,8 @@ void feed_Task(void *arg)
     int16_t *feed_buf = (int16_t *)malloc(audio_chunksize * feed_channel * sizeof(int16_t));
     assert(i2s_buff && feed_buf);
     size_t r_bytes = 0;
+    int16_t *fed = NULL;      // 本轮实际喂给 AFE 的缓冲（用于电平统计）
+    static int dbg_cnt = 0;   // 电平打印计数，约 1 秒一次
 
     while (1) {
         if (free_task == 1) {
@@ -103,20 +105,35 @@ void feed_Task(void *arg)
             for (int i = 0; i < audio_chunksize; i++) {
                 tmp_buff[i] = tmp_buff[i] >> 14;
             }
-            afe_handle->feed(afe_data, (int16_t*)tmp_buff);
+            fed = (int16_t*)tmp_buff;
+            afe_handle->feed(afe_data, fed);
         } else if (g_mic_mode == MIC_MODE_16BIT_MONO) {
             for (int i = 0; i < audio_chunksize; i++) {
                 feed_buf[2 * i]     = i2s_buff[i];
                 feed_buf[2 * i + 1] = 0;
             }
-            afe_handle->feed(afe_data, feed_buf);
+            fed = feed_buf;
+            afe_handle->feed(afe_data, fed);
         } else { // MIC_MODE_16BIT_STEREO
             // [L,R] 交错，取 slot 指定的槽作为麦克风，另一槽未用
             for (int i = 0; i < audio_chunksize; i++) {
                 feed_buf[2 * i]     = i2s_buff[2 * i + g_mic_slot];
                 feed_buf[2 * i + 1] = 0;
             }
-            afe_handle->feed(afe_data, feed_buf);
+            fed = feed_buf;
+            afe_handle->feed(afe_data, fed);
+        }
+
+        // 约 1 秒打印一次麦克风通道峰值（诊断：确认语音是否到达 AFE、量级是否正常）
+        if (++dbg_cnt >= 31) {
+            dbg_cnt = 0;
+            int peak = 0;
+            for (int i = 0; i < audio_chunksize; i++) {
+                int v = fed[2 * i];
+                if (v < 0) v = -v;
+                if (v > peak) peak = v;
+            }
+            mp_print_asr("[ASR] mic peak=%d\n", peak);
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -341,6 +358,20 @@ extern "C" __attribute__((weak)) void create_asr(void) {
     }
 
     afe_config_t *afe_config = afe_config_init("MN", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+    // 配置回读：把 afe_config_init 实际生效的开关打印出来（AFE 是闭源库，只能这样看）
+    mp_print_asr("[ASR] afe cfg: aec=%d se=%d ns=%d vad=%d wakenet=%d agc=%d gain=%d/100\n",
+                 (int)afe_config->aec_init, (int)afe_config->se_init,
+                 (int)afe_config->ns_init, (int)afe_config->vad_init,
+                 (int)afe_config->wakenet_init, (int)afe_config->agc_init,
+                 (int)(afe_config->afe_linear_gain * 100));
+    mp_print_asr("[ASR] afe pcm: total_ch=%d mic=%d ref=%d rate=%d\n",
+                 afe_config->pcm_config.total_ch_num, afe_config->pcm_config.mic_num,
+                 afe_config->pcm_config.ref_num, afe_config->pcm_config.sample_rate);
+    if (afe_config->wakenet_model_name) {
+        mp_print_asr("[ASR] wakenet model: %s\n", afe_config->wakenet_model_name);
+    } else {
+        mp_print_asr("[ASR] ERROR: wakenet_model_name is NULL!\n");
+    }
     afe_handle = esp_afe_handle_from_config(afe_config);
     esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
     afe_config_free(afe_config);
