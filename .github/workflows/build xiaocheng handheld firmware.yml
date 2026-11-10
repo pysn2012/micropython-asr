@@ -97,16 +97,14 @@ jobs:
         if: failure()
         run: |
           cd ${{ env.MICROPYTHON_DIR }}/ports/esp32
-          for f in build-*/log/idf_py_stderr_output_*; do
+          echo "======== 错误行检索 ========"
+          grep -n -iE "error:|FAILED:|fatal|Killed|undefined|No such file" \
+            build-*/log/idf_py_*output_* || echo "(日志中未匹配到错误关键词)"
+          echo "======== 各日志文件尾部(400行) ========"
+          for f in build-*/log/idf_py_*output_*; do
             if [ -f "$f" ]; then
-              echo "==== $f ===="
-              tail -n 120 "$f" || true
-            fi
-          done
-          for f in build-*/log/idf_py_stdout_output_*; do
-            if [ -f "$f" ]; then
-              echo "==== $f ===="
-              tail -n 60 "$f" || true
+              echo "---- $f ----"
+              tail -n 400 "$f" || true
             fi
           done
 
