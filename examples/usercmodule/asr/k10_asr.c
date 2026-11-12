@@ -61,7 +61,9 @@ static void asr_callback_task(void* arg) {
         if (cb_free_task == 1) {
             break;
         }
-        if (xQueueReceive(asr_result_queue, &data, portMAX_DELAY)) {
+        if (xQueueReceive(asr_result_queue, &data, pdMS_TO_TICKS(500))) {
+            // 用 500ms 超时而非 portMAX_DELAY，否则 cb_free_task 置位后本任务
+            // 永远阻塞收不到退出通知，每次 free 后泄漏一个任务
             if (g_asr_callback != mp_const_none) {
                 // 把识别ID推送到回调函数
                 mp_sched_schedule(g_asr_callback, mp_obj_new_int(data.audio_id));
@@ -104,6 +106,10 @@ static mp_obj_t mp_init_asr(size_t n_args, const mp_obj_t *pos_args, mp_map_t *k
     mp_arg_parse_all(n_args, pos_args, kw_args,
         MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
+    // 重复运行保护：soft reboot 不会杀 FreeRTOS 任务，上一轮的 detect/feed 任务和 I2S
+    // 可能还在运行。先走完整回收握手（free_asr 内部会等任务退出再释放资源），
+    // 再清零标志并重新初始化——否则 i2s_new_channel 在已占用的 I2S0 上失败直接 abort。
+    free_asr();
     free_task = 0;
     cb_free_task = 0;
     init_asr(args[ARG_wake_time].u_int, args[ARG_wake_flag].u_int,
@@ -127,6 +133,13 @@ static mp_obj_t mp_free_asr(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_free_asr_obj, mp_free_asr);
+
+// MN 模型就绪轮询：True = 可以 add_asr_command 了
+extern int asr_mn_ready(void);
+static mp_obj_t mp_ready(void) {
+    return mp_obj_new_bool(asr_mn_ready());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_ready_obj, mp_ready);
 
 static mp_obj_t mp_start_tts(void) {
     if (!tts_data_queue) {
@@ -155,6 +168,7 @@ static const mp_rom_map_elem_t k10_asr_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_start_asr), MP_ROM_PTR(&mp_start_asr_obj) },//启动音频采集任务
     { MP_ROM_QSTR(MP_QSTR_add_asr_command), MP_ROM_PTR(&mp_add_asr_command_obj) },//添加音频采集命令
     { MP_ROM_QSTR(MP_QSTR_free_asr), MP_ROM_PTR(&mp_free_asr_obj) },//释放音频采集资源
+    { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&mp_ready_obj) },//MN模型就绪轮询(True后才能add命令词)
     { MP_ROM_QSTR(MP_QSTR_ASR_MODE_SINGLE),         MP_ROM_INT(ASR_MODE_SINGLE) },
     { MP_ROM_QSTR(MP_QSTR_ASR_MODE_CONTINUOUS),     MP_ROM_INT(ASR_MODE_CONTINUOUS) },
     { MP_ROM_QSTR(MP_QSTR_start_tts), MP_ROM_PTR(&mp_start_tts_obj) },//TTS数据队列

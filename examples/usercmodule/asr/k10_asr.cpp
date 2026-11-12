@@ -73,6 +73,12 @@ static int wakeup_flag = 0;
 // 调用 add 是常见时序，必须显式拦截。
 static volatile int g_mn_ready = 0;
 
+// 任务生命周期状态（soft reboot 不会杀 FreeRTOS 任务，重复运行 init/start 必须先回收旧实例，
+// 否则 i2s_new_channel 在已占用的 I2S0 上失败 -> ESP_ERROR_CHECK abort -> 直接崩溃）
+static esp_afe_sr_data_t *g_afe_data = NULL;  // AFE 实例，由 free_asr 统一销毁
+static volatile int g_detect_exited = 1;      // 1 = detect 任务不在运行
+static volatile int g_feed_exited = 1;        // 1 = feed 任务不在运行
+
 // 麦克风输入模式（init_asr 时确定）
 enum {
     MIC_MODE_32BIT_MONO = 0,  // 独立总线 + 32bit 单声道（INMP441，K10 移位技巧）
@@ -99,10 +105,11 @@ void feed_Task(void *arg)
     int short_reads = 0;      // I2S 短读计数（读不满=DMA欠载）
 
     while (1) {
-        if (free_task == 1) {
+        // 等 detect 任务先退出（cb_free_task）：detect 退出前 feed 必须继续喂数据，
+        // 否则 detect 阻塞在 fetch 空环形缓冲上永远退不出来
+        if (cb_free_task == 1) {
             break;
         }
-
         // 读字节数按模式区分：32bit 单声道=chunk*4；16bit 单声道=chunk*2
         // （原版一律 chunk*4，16bit 单声道会把 2 倍时长的音频当 1 块喂，节奏错一倍）；
         // 16bit stereo=chunk*4（chunk 组 L/R 对）
@@ -169,6 +176,7 @@ void feed_Task(void *arg)
         free(feed_buf);
         feed_buf = NULL;
     }
+    g_feed_exited = 1;  // 通知 free_asr 本任务已退出
     vTaskDelete(NULL);
 }
 
@@ -182,6 +190,7 @@ void detect_Task(void *arg)
         mp_print_asr("[ASR] ERROR: no chinese MN model! "
                      "srmodels.bin does not match sdkconfig (expect mn7_cn)\n");
         cb_free_task = 1;
+        g_detect_exited = 1;
         vTaskDelete(NULL);
         return;
     }
@@ -197,6 +206,7 @@ void detect_Task(void *arg)
                      (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                      (int)uxTaskGetStackHighWaterMark(NULL));
         cb_free_task = 1;
+        g_detect_exited = 1;
         vTaskDelete(NULL);
         return;
     }
@@ -208,6 +218,7 @@ void detect_Task(void *arg)
         mp_print_asr("[ASR] ERROR: esp_mn_commands_alloc FAILED\n");
         multinet->destroy(model_data);
         cb_free_task = 1;
+        g_detect_exited = 1;
         vTaskDelete(NULL);
         return;
     }
@@ -272,12 +283,10 @@ void detect_Task(void *arg)
         multinet->destroy(model_data);
         model_data = NULL;
     }
-    if (afe_data) {
-        afe_handle->destroy(afe_data);
-        afe_data = NULL;
-    }
-    cb_free_task = 1;
-    vTaskDelay(pdMS_TO_TICKS(10));
+    // 注意：afe_data 不能在这里销毁——feed 任务此时可能还在跑最后一段 feed。
+    // AFE 实例由 free_asr 在确认所有任务退出后统一销毁。
+    cb_free_task = 1;        // 通知 feed / 回调任务退出
+    g_detect_exited = 1;     // 通知 free_asr 本任务已退出
     vTaskDelete(NULL);
 }
 
@@ -398,12 +407,21 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
 // 音频采集任务
 extern "C" __attribute__((weak)) void create_asr(void) {
 
+    // 重复启动保护：任务还在跑时直接忽略（Thonny 里重复执行 start_asr 会创建重复任务）
+    if (!g_detect_exited) {
+        mp_print_asr("[ASR] start_asr 忽略: 任务已在运行, 先执行 asr.free_asr()\n");
+        return;
+    }
+    g_detect_exited = 0;
+    g_feed_exited = 0;
     g_mn_ready = 0;  // 新一轮初始化，MN 未就绪
     models = esp_srmodel_init("model");
     if (models == NULL || models->num == 0) {
         // 模型分区缺失/为空：明确报错并退出，避免后续空指针崩溃
         mp_print_asr("[ASR] ERROR: model partition empty! "
                      "srmodels.bin not flashed or invalid\n");
+        g_detect_exited = 1;  // 任务没创建成功，复位运行标志
+        g_feed_exited = 1;
         return;
     }
     mp_print_asr("[ASR] models loaded: %d\n", models->num);
@@ -429,6 +447,16 @@ extern "C" __attribute__((weak)) void create_asr(void) {
     afe_handle = esp_afe_handle_from_config(afe_config);
     esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
     afe_config_free(afe_config);
+    if (afe_data == NULL) {
+        mp_print_asr("[ASR] ERROR: AFE create_from_config NULL! "
+                     "heap_free=%d psram_free=%d\n",
+                     (int)esp_get_free_heap_size(),
+                     (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        g_detect_exited = 1;  // 任务没创建成功，复位运行标志
+        g_feed_exited = 1;
+        return;
+    }
+    g_afe_data = afe_data;  // 交给 free_asr 统一销毁
 
     xTaskCreatePinnedToCore(&detect_Task, "detect", 8 * 1024, (void*)afe_data, 5, NULL, 1);
     xTaskCreatePinnedToCore(&feed_Task, "feed", 8 * 1024, (void*)afe_data, 5, NULL, 0);
@@ -464,7 +492,20 @@ extern "C" __attribute__((weak)) void add_asr_command(int id, const char *comman
 
 extern "C" __attribute__((weak)) void free_asr(void){
     g_mn_ready = 0;  // 停止接受命令词添加
-    // 2. 释放I2S资源
+    // 1. 请求 detect 任务退出（feed 任务此时仍继续喂数据，保证 detect 的 fetch 不会
+    //    阻塞在空环形缓冲上退不出来——这正是旧版"free 后任务永远杀不掉"的原因）
+    free_task = 1;
+    for (int i = 0; i < 60 && g_detect_exited == 0; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    for (int i = 0; i < 60 && g_feed_exited == 0; i++) vTaskDelay(pdMS_TO_TICKS(10));
+    if (g_detect_exited == 0 || g_feed_exited == 0) {
+        mp_print_asr("[ASR] WARN: 任务未在 600ms 内退出, 跳过资源释放(泄漏但不崩溃)\n");
+        return;
+    }
+    // 2. 所有任务已确认退出，安全销毁 AFE 实例与 I2S
+    if (g_afe_data && afe_handle) {
+        afe_handle->destroy(g_afe_data);
+        g_afe_data = NULL;
+    }
     if(rx_handle) {
         i2s_channel_disable(rx_handle);
         i2s_del_channel(rx_handle);
@@ -479,9 +520,14 @@ extern "C" __attribute__((weak)) void free_asr(void){
         vTaskDelete(tts_task_handle);
         tts_task_handle = NULL;
     }
-     
+
      // 5. 等待一小段时间确保资源完全释放
      vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+// 供 Python 层轮询 MN 就绪状态（asr.ready()）
+extern "C" int asr_mn_ready(void){
+    return g_mn_ready;
 }
 
 esp_err_t bsp_audio_play(const int16_t* data, int length)
