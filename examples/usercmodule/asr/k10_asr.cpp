@@ -16,6 +16,7 @@
 extern "C" {
     #include "esp_log.h"
     #include "esp_system.h"
+    #include "esp_heap_caps.h"
     #include "freertos/FreeRTOS.h"
     #include "freertos/semphr.h"
     #include "freertos/task.h"
@@ -66,6 +67,12 @@ srmodel_list_t *models = NULL;
 
 static int wakeup_flag = 0;
 
+// MultiNet 就绪标志：esp_mn_commands_alloc 成功后才允许 add_asr_command。
+// 否则 esp_mn_commands_add 只会返回晦涩的 ESP_ERR_INVALID_STATE（源码 esp_mn_speech_commands.c:
+// "NULL == esp_mn_root ... Please create mn model first"），且 REPL 在 MN 量化完成前
+// 调用 add 是常见时序，必须显式拦截。
+static volatile int g_mn_ready = 0;
+
 // 麦克风输入模式（init_asr 时确定）
 enum {
     MIC_MODE_32BIT_MONO = 0,  // 独立总线 + 32bit 单声道（INMP441，K10 移位技巧）
@@ -88,7 +95,7 @@ void feed_Task(void *arg)
     assert(i2s_buff && feed_buf);
     size_t r_bytes = 0;
     int16_t *fed = NULL;      // 本轮实际喂给 AFE 的缓冲（用于电平统计）
-    static int dbg_cnt = 0;   // 电平打印计数，约 1 秒一次
+    TickType_t last_peak_tick = 0;  // 电平打印节拍（3 秒一次）
     int short_reads = 0;      // I2S 短读计数（读不满=DMA欠载）
 
     while (1) {
@@ -96,8 +103,13 @@ void feed_Task(void *arg)
             break;
         }
 
-        i2s_channel_read(rx_handle, i2s_buff, audio_chunksize * 4, &r_bytes, portMAX_DELAY);
-        if (r_bytes != (size_t)(audio_chunksize * 4)) {
+        // 读字节数按模式区分：32bit 单声道=chunk*4；16bit 单声道=chunk*2
+        // （原版一律 chunk*4，16bit 单声道会把 2 倍时长的音频当 1 块喂，节奏错一倍）；
+        // 16bit stereo=chunk*4（chunk 组 L/R 对）
+        size_t want = (g_mic_mode == MIC_MODE_16BIT_MONO) ? (size_t)audio_chunksize * 2
+                                                          : (size_t)audio_chunksize * 4;
+        i2s_channel_read(rx_handle, i2s_buff, want, &r_bytes, portMAX_DELAY);
+        if (r_bytes != want) {
             short_reads++;
         }
 
@@ -128,9 +140,11 @@ void feed_Task(void *arg)
             afe_handle->feed(afe_data, fed);
         }
 
-        // 约 1 秒打印一次麦克风通道峰值（诊断：确认语音是否到达 AFE、量级是否正常）
-        if (++dbg_cnt >= 31) {
-            dbg_cnt = 0;
+        // 每 3 秒打印一次麦克风通道峰值（诊断：确认语音是否到达 AFE、量级是否正常）。
+        // 1 秒一打会与 detect 任务/REPL 输出互相打断，日志全是碎片没法读。
+        TickType_t now_tick = xTaskGetTickCount();
+        if (now_tick - last_peak_tick >= pdMS_TO_TICKS(3000)) {
+            last_peak_tick = now_tick;
             int peak = 0;
             for (int i = 0; i < audio_chunksize; i++) {
                 int v = fed[2 * i];
@@ -174,7 +188,30 @@ void detect_Task(void *arg)
     mp_print_asr("[ASR] detect task started, mn=%s, chunksize=%d\n", mn_name, afe_chunksize);
     esp_mn_iface_t *multinet = esp_mn_handle_from_name(mn_name);
     model_iface_data_t *model_data = multinet->create(mn_name, wake_time);
-    esp_mn_commands_alloc(multinet,model_data);
+    // create 会加载/量化 MN 模型（掌机板曾在此阶段崩溃），必须判空：
+    // 返回 NULL 时后续 esp_mn_commands_alloc(multinet, NULL) 会在闭源库内直接空引用
+    if (model_data == NULL) {
+        mp_print_asr("[ASR] ERROR: multinet->create NULL! "
+                     "heap_free=%d psram_free=%d stack_hwm=%d\n",
+                     (int)esp_get_free_heap_size(),
+                     (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                     (int)uxTaskGetStackHighWaterMark(NULL));
+        cb_free_task = 1;
+        vTaskDelete(NULL);
+        return;
+    }
+    mp_print_asr("[ASR] mn created: heap_free=%d psram_free=%d stack_hwm=%d\n",
+                 (int)esp_get_free_heap_size(),
+                 (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (int)uxTaskGetStackHighWaterMark(NULL));
+    if (esp_mn_commands_alloc(multinet, model_data) != ESP_OK) {
+        mp_print_asr("[ASR] ERROR: esp_mn_commands_alloc FAILED\n");
+        multinet->destroy(model_data);
+        cb_free_task = 1;
+        vTaskDelete(NULL);
+        return;
+    }
+    g_mn_ready = 1;  // 此后 add_asr_command 才可用
 
     while (1) {
         if (free_task == 1) {
@@ -361,6 +398,7 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
 // 音频采集任务
 extern "C" __attribute__((weak)) void create_asr(void) {
 
+    g_mn_ready = 0;  // 新一轮初始化，MN 未就绪
     models = esp_srmodel_init("model");
     if (models == NULL || models->num == 0) {
         // 模型分区缺失/为空：明确报错并退出，避免后续空指针崩溃
@@ -398,24 +436,34 @@ extern "C" __attribute__((weak)) void create_asr(void) {
 }
 
 extern "C" __attribute__((weak)) void add_asr_command(int id, const char *command){
-    esp_err_t ret = esp_mn_commands_add(id, command);
-    if (ret != ESP_OK) {
-        mp_print_asr("[ASR] add_asr_command(%d, %s) FAILED ret=%d "
-                     "(命令词须在 start_asr 之后、模型 alloc 成功后添加)\n",
-                     id, command, (int)ret);
-    } else {
-        mp_print_asr("[ASR] command added: id=%d %s\n", id, command);
+    if (!g_mn_ready) {
+        mp_print_asr("[ASR] cmd id=%d 未就绪: MN 还在创建模型, start_asr 后等 3 秒再添加\n", id);
+        return;
     }
+    esp_err_t ret = esp_mn_commands_add(id, command);
+    // 单行短格式：与其他任务的输出交错后仍可辨认（ret=0 即成功）
+    mp_print_asr("[ASR] cmd add id=%d ret=%d (0=ok) %s\n", id, (int)ret, command);
     // 注意：esp_mn_commands_update 返回 esp_mn_error_t*（成功为 NULL），不是 esp_err_t。
     // esp_mn_error_t 仅有 int16_t num 与 esp_mn_phrase_t **phrases 两个字段（esp_mn_iface.h L67-70）。
     esp_mn_error_t *err = esp_mn_commands_update();
     if (err != NULL) {
-        mp_print_asr("[ASR] commands_update FAILED: %d 个命令词未能写入模型\n", (int)err->num);
+        mp_print_asr("[ASR] cmd update: %d 个词未能写入模型\n", (int)err->num);
         free(err);
     }
+    // 回显 MN 当前实际的命令词清单（esp_mn_commands_print 走 LOGI 会被日志级别吞掉，
+    // 改用 esp_mn_commands_get_from_index 遍历链表，直接给出 MN 到底认得哪些命令）
+    int total = 0;
+    for (int i = 0; i < ESP_MN_MAX_PHRASE_NUM; i++) {
+        esp_mn_phrase_t *p = esp_mn_commands_get_from_index(i);
+        if (p == NULL) break;
+        mp_print_asr("[ASR] cmd list[%d]: id=%d %s\n", i, (int)p->command_id, p->string);
+        total++;
+    }
+    mp_print_asr("[ASR] cmd total=%d\n", total);
 }
 
 extern "C" __attribute__((weak)) void free_asr(void){
+    g_mn_ready = 0;  // 停止接受命令词添加
     // 2. 释放I2S资源
     if(rx_handle) {
         i2s_channel_disable(rx_handle);
