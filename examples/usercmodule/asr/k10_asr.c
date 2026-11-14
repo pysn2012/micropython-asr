@@ -15,13 +15,16 @@ int free_task = 0;
 int cb_free_task = 0;
 
 void mp_print_asr_cstr(const char *str) {
-    mp_printf(&mp_plat_print, "%s", str);
+    // 不能用 mp_printf：feed/detect 是原生 FreeRTOS 任务，不在 MicroPython
+    // 线程表里。长字符串会让 mp_hal_stdout_tx_strn() 释放/重取 GIL，
+    // 原生任务把 GIL 留在自己手里，Python 主任务会被永久饿死。
+    printf("%s", str);
 }
 
 void mp_print_asr(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    mp_vprintf(&mp_plat_print, fmt, args);  // 用 MicroPython 的 vprintf
+    vprintf(fmt, args);  // 走 IDF 控制台，不碰 MicroPython GIL
     va_end(args);
 }
 
