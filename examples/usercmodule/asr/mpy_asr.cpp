@@ -530,6 +530,11 @@ extern "C" int asr_mn_ready(void){
     return g_mn_ready;
 }
 
+// 供 Python 层查询唤醒状态（asr.wake_state()）：1=已唤醒（命令窗口开启），0=待唤醒
+extern "C" int asr_wake_state(void){
+    return wakeup_flag;
+}
+
 esp_err_t bsp_audio_play(const int16_t* data, int length)
 {
     // length 为字节数；TX 为 16bit 立体声，每个采样复制到左右两个槽

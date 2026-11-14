@@ -144,6 +144,13 @@ static mp_obj_t mp_ready(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mp_ready_obj, mp_ready);
 
+// 唤醒状态查询：1=已唤醒（命令窗口开启），0=待唤醒
+extern int asr_wake_state(void);
+static mp_obj_t mp_wake_state(void) {
+    return MP_OBJ_NEW_SMALL_INT(asr_wake_state());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mp_wake_state_obj, mp_wake_state);
+
 static mp_obj_t mp_start_tts(void) {
     if (!tts_data_queue) {
         tts_data_queue = xQueueCreate(10, sizeof(const char *));
@@ -172,6 +179,7 @@ static const mp_rom_map_elem_t mpy_asr_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_add_asr_command), MP_ROM_PTR(&mp_add_asr_command_obj) },//添加音频采集命令
     { MP_ROM_QSTR(MP_QSTR_free_asr), MP_ROM_PTR(&mp_free_asr_obj) },//释放音频采集资源
     { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&mp_ready_obj) },//MN模型就绪轮询(True后才能add命令词)
+    { MP_ROM_QSTR(MP_QSTR_wake_state), MP_ROM_PTR(&mp_wake_state_obj) },//唤醒状态(1=已唤醒命令窗口开启,0=待唤醒)
     { MP_ROM_QSTR(MP_QSTR_ASR_MODE_SINGLE),         MP_ROM_INT(ASR_MODE_SINGLE) },
     { MP_ROM_QSTR(MP_QSTR_ASR_MODE_CONTINUOUS),     MP_ROM_INT(ASR_MODE_CONTINUOUS) },
     { MP_ROM_QSTR(MP_QSTR_start_tts), MP_ROM_PTR(&mp_start_tts_obj) },//TTS数据队列
