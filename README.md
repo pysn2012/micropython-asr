@@ -2,20 +2,23 @@
 
 本仓库是 [micropython/micropython](https://github.com/micropython/micropython) 的 fork，在 ESP32-S3 端口集成 ESP-SR，以用户 C 模块向 Python 暴露 `asr` 模块，提供：
 
-- **离线唤醒**：WakeNet9（当前掌机 = "小明同学"，其余板 = "Hi,乐鑫"）
+- **离线唤醒**：WakeNet9 "小明同学"（wn9_xiaomingtongxue_tts2，三块板统一）
 - **离线中文命令词**：MultiNet7 `mn7_cn` 量化版（命令词传拼音）
-- **中文 TTS 播报**：esp-tts xiaole 音色（需 16MB Flash 板）
+- **中文 TTS 播报**：esp-tts xiaoxin 音色（需 16MB Flash 板）
 
 软件栈：MicroPython v1.29 ＋ ESP-IDF v5.5.6 ＋ esp-sr v2.6.1（master，CI 每次 clone 最新）。
 
 ## 1. 仓库结构与版本
 
 ```
-examples/usercmodule/asr/     asr 用户模块（本仓库核心代码）
-  mpy_asr.cpp                   核心 C++：I2S 驱动 + feed/detect/tts 任务 + AFE/MN/TTS 生命周期
-  mpy_asr.c                     MicroPython 模块封装 + 回调队列任务
-  asr_data.h / asr_data.c       数据结构与回调
-  micropython.cmake             构建配置（usermod_mpy_asr）
+examples/usercmodule/
+  asr/                          asr 用户模块（本仓库核心代码）
+    mpy_asr.cpp                   核心 C++：I2S 驱动 + feed/detect/tts 任务 + AFE/MN/TTS 生命周期
+    mpy_asr.c                     MicroPython 模块封装 + 回调队列任务
+    asr_data.h / asr_data.c       数据结构与回调
+    micropython.cmake             构建配置（usermod_mpy_asr）
+  xiaocheng_modules.cmake       掌机固件用户模块聚合清单（asr + st7789，仅掌机工作流挂载）
+  st7789_mpy/                   ST7789 屏幕 C 模块（submodule：russhughes/st7789_mpy，pin 447d5fa）
 ports/esp32/
   boards/ESP32_GENERIC_S3/          8MB 开发板（sdkconfig.board 选模型）
   boards/ESP32_GENERIC_S3_ASR16M/   16MB 开发板
@@ -24,7 +27,7 @@ ports/esp32/
   Makefile                          构建入口 + 固件合成（makeimg.py，TTS 音色 .dat 在此指定）
 .github/workflows/
   build esp32 firmware.yml          产出 8MB + ASR16M 固件（手动触发）
-  build xiaocheng handheld firmware.yml  产出掌机固件（手动触发）
+  build xiaocheng handheld firmware.yml  产出掌机固件（手动触发，额外挂载 ST7789）
 ```
 
 **MicroPython 版本选择**：本仓库是完整 fork，版本即 fork 时点的上游版本（当前 v1.29，见 `py/mpconfig.h` 的 `MICROPY_VERSION_MAJOR/MINOR`），**没有配置项可选**。换版本 = 合并上游 tag：
@@ -160,7 +163,7 @@ CONFIG_SR_WN_WN9_XIAOMINGTONGXUE_TTS2=y   # 小明同学
 
 符号规则：esp-sr 模型文件夹 `wn9_xxx` → 符号 `SR_WN_WN9_XXX`（大写）。候选清单见 esp-sr 仓库 `wakeword_list.md`（60+ 个），符号须存在于 `Kconfig.projbuild` 的 "Load Multiple Wake Words" 菜单。官方多数模型为 TTS 流水线生成，泛化性能需上板实测。自制唤醒词走乐鑫官方免费定制训练（周期约 2~4 周），模型文件夹进仓库后用 `CONFIG_ESP_SR_EXTERNAL_MODEL_PATH` 指向。wn10 代模型算力开销大，与 `AFE_MODE_LOW_COST` 兼容性未验证。Python 侧零改动。
 
-**换 TTS 音色**：改 `ports/esp32/Makefile` 末尾的 .dat 路径：`xiaole`（小乐女声 2.87MB，当前）/ `xiaoxin`（3.64MB）/ `xiaoxin_small`（2.78MB）。掌机 3890K 分区均可容纳。代码用 `esp_tts_voice_template`+分区 mmap，换音色无需改 C 代码。仅对有 voice_data 分区的板生效；不支持自定义录音音色。
+**换 TTS 音色**：改 `ports/esp32/Makefile` 末尾的 .dat 路径：`xiaoxin`（小鑫 3.64MB，当前）/ `xiaole`（小乐女声 2.87MB）/ `xiaoxin_small`（2.78MB）。掌机 3890K 分区均可容纳。代码用 `esp_tts_voice_template`+分区 mmap，换音色无需改 C 代码。仅对有 voice_data 分区的板生效；不支持自定义录音音色。
 
 ## 6. 故障排查速查
 

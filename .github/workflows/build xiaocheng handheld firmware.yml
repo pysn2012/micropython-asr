@@ -89,7 +89,7 @@ jobs:
           make BOARD=${{ matrix.board }} \
                BOARD_VARIANT=${{ matrix.variant }} \
                FLASH_SIZE=${{ matrix.flash_size }}MB \
-               USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/asr/micropython.cmake" \
+               USER_C_MODULES="${{ github.workspace }}/examples/usercmodule/xiaocheng_modules.cmake" \
                -j$(nproc)
 
       # 8. 构建失败时打印详细日志（idf.py 的真实错误在 log/ 目录里，默认不显示）
