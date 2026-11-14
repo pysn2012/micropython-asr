@@ -95,7 +95,7 @@ all:
 		$(BUILD)/firmware.bin \
 		$(BUILD)/micropython.uf2 \
 		$(BUILD)/srmodels/srmodels.bin \
-		$(ESP_SR_COMPONENT_DIR)/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaoxin.dat
+		$(ESP_SR_COMPONENT_DIR)/esp-tts/esp_tts_chinese/esp_tts_voice_data_xiaole.dat
 
 #$(call RUN_IDF_PY,$(DEVICE) flash)
 

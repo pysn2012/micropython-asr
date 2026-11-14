@@ -1,15 +1,15 @@
 # 创建用户模块库
 set(ESP_SR_DIR $ENV{ESP_SR_COMPONENT_DIR})
-add_library(usermod_K10_asr INTERFACE)
+add_library(usermod_mpy_asr INTERFACE)
 
 # 添加源文件
-target_sources(usermod_K10_asr INTERFACE
-    ${CMAKE_CURRENT_LIST_DIR}/k10_asr.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/k10_asr.c
+target_sources(usermod_mpy_asr INTERFACE
+    ${CMAKE_CURRENT_LIST_DIR}/mpy_asr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mpy_asr.c
 )
 
 # 设置包含目录
-target_include_directories(usermod_K10_asr INTERFACE
+target_include_directories(usermod_mpy_asr INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${ESP_SR_DIR}
     ${ESP_SR_DIR}/include/esp32s3
@@ -19,7 +19,7 @@ target_include_directories(usermod_K10_asr INTERFACE
 )
 
 # 启用C++异常和RTTI - 只对C++文件
-target_compile_options(usermod_K10_asr INTERFACE
+target_compile_options(usermod_mpy_asr INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:-fexceptions>
     $<$<COMPILE_LANGUAGE:CXX>:-frtti>
     $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++17>
@@ -27,7 +27,7 @@ target_compile_options(usermod_K10_asr INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:-Wno-gnu-zero-variadic-macro-arguments>
 )
 
-target_compile_definitions(usermod_K10_asr INTERFACE
+target_compile_definitions(usermod_mpy_asr INTERFACE
     CONFIG_IDF_TARGET_ESP32S3
     ESP_PLATFORM
     ESP32
@@ -36,6 +36,6 @@ target_compile_definitions(usermod_K10_asr INTERFACE
 )
 
 # 链接到主用户模块
-target_link_libraries(usermod INTERFACE usermod_K10_asr)
+target_link_libraries(usermod INTERFACE usermod_mpy_asr)
 
 

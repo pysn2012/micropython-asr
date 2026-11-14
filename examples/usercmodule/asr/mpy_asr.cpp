@@ -81,7 +81,7 @@ static volatile int g_feed_exited = 1;        // 1 = feed 任务不在运行
 
 // 麦克风输入模式（init_asr 时确定）
 enum {
-    MIC_MODE_32BIT_MONO = 0,  // 独立总线 + 32bit 单声道（INMP441，K10 移位技巧）
+    MIC_MODE_32BIT_MONO = 0,  // 独立总线 + 32bit 单声道（INMP441，K10 沿用的移位技巧）
     MIC_MODE_16BIT_MONO,      // 独立总线 + 16bit 单声道（ES7210 等 codec 单独接）
     MIC_MODE_16BIT_STEREO,    // 共享总线全双工（ES7210/ES8311 共用 BCLK/WS，掌机类硬件）
 };
@@ -123,7 +123,7 @@ void feed_Task(void *arg)
         if (g_mic_mode == MIC_MODE_32BIT_MONO) {
             // INMP441：32bit 槽内有效位在 29:13，>>14 后原地变成
             // [样本, 符号扩展] 交错的 chunksize*2 个 int16 —— 正好是
-            // [麦克风, 未用通道] 的 feed 布局（K10 移位技巧，同时完成增益放大）
+            // [麦克风, 未用通道] 的 feed 布局（K10 沿用的移位技巧，同时完成增益放大）
             int32_t *tmp_buff = (int32_t*)i2s_buff;
             for (int i = 0; i < audio_chunksize; i++) {
                 tmp_buff[i] = tmp_buff[i] >> 14;
@@ -308,7 +308,7 @@ extern "C" __attribute__((weak)) void init_asr(int time, int flag,
 
     if (shared_bus) {
         // ---- 共享总线全双工：单控制器 I2S0，tx/rx 共用同一 std 配置 ----
-        // 16bit 立体声 @16kHz，tx/rx 同配置保证 BCLK/WS 完全一致（K10 同构拓扑）。
+        // 16bit 立体声 @16kHz，tx/rx 同配置保证 BCLK/WS 完全一致（沿用 K10 板的同构拓扑）。
         // MCLK 不由固件输出——这类板卡的 MCLK 由 Python 侧 PWM 生成（256×fs）
         g_mic_mode = MIC_MODE_16BIT_STEREO;
         i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);

@@ -1,227 +1,178 @@
-[![Unix CI badge](https://github.com/micropython/micropython/actions/workflows/ports_unix.yml/badge.svg)](https://github.com/micropython/micropython/actions?query=branch%3Amaster+event%3Apush) [![STM32 CI badge](https://github.com/micropython/micropython/actions/workflows/ports_stm32.yml/badge.svg)](https://github.com/micropython/micropython/actions?query=branch%3Amaster+event%3Apush) [![Docs CI badge](https://github.com/micropython/micropython/actions/workflows/docs.yml/badge.svg)](https://docs.micropython.org/) [![codecov](https://codecov.io/gh/micropython/micropython/branch/master/graph/badge.svg?token=I92PfD05sD)](https://codecov.io/gh/micropython/micropython)
+# micropython-asr — MicroPython ESP32-S3 离线语音固件
 
-The MicroPython project
-=======================
-<p align="center">
-  <img src="https://raw.githubusercontent.com/micropython/micropython/master/logo/upython-with-micro.jpg" alt="MicroPython Logo"/>
-</p>
+本仓库是 [micropython/micropython](https://github.com/micropython/micropython) 的 fork，在 ESP32-S3 端口集成 ESP-SR，以用户 C 模块向 Python 暴露 `asr` 模块，提供：
 
-This is the MicroPython project, an implementation of Python 3.x for
-microcontrollers, embedded systems and other constrained platforms.
-You can find the official website at [micropython.org](http://www.micropython.org).
+- **离线唤醒**：WakeNet9（当前掌机 = "小明同学"，其余板 = "Hi,乐鑫"）
+- **离线中文命令词**：MultiNet7 `mn7_cn` 量化版（命令词传拼音）
+- **中文 TTS 播报**：esp-tts xiaole 音色（需 16MB Flash 板）
 
-MicroPython implements the entire Python 3.4 syntax (including exceptions,
-`with`, `yield from`, etc., and additionally `async`/`await` keywords from
-Python 3.5 and some select features from later versions). The following core
-datatypes are provided: `str`(including basic Unicode support), `bytes`,
-`bytearray`, `tuple`, `list`, `dict`, `set`, `frozenset`, `array.array`,
-`collections.namedtuple`, classes and instances. Builtin modules include
-`os`, `sys`, `time`, `re`, and `struct`, etc. Some ports have support for
-`_thread` module (multithreading), `socket` and `ssl` for networking, and
-`asyncio`. Note that only a subset of Python 3 functionality is implemented
-for the data types and modules.
+软件栈：MicroPython v1.29 ＋ ESP-IDF v5.5.6 ＋ esp-sr v2.6.1（master，CI 每次 clone 最新）。
 
-MicroPython can execute scripts in textual source form (.py files) or from
-precompiled bytecode (.mpy files), in both cases either from an on-device
-filesystem or "frozen" into the MicroPython executable.
+## 1. 仓库结构与版本
 
-MicroPython also provides a set of MicroPython-specific modules to access
-hardware-specific functionality and peripherals such as GPIO, Timers, ADC,
-DAC, PWM, SPI, I2C, CAN, Bluetooth, and USB.
+```
+examples/usercmodule/asr/     asr 用户模块（本仓库核心代码）
+  mpy_asr.cpp                   核心 C++：I2S 驱动 + feed/detect/tts 任务 + AFE/MN/TTS 生命周期
+  mpy_asr.c                     MicroPython 模块封装 + 回调队列任务
+  asr_data.h / asr_data.c       数据结构与回调
+  micropython.cmake             构建配置（usermod_mpy_asr）
+ports/esp32/
+  boards/ESP32_GENERIC_S3/          8MB 开发板（sdkconfig.board 选模型）
+  boards/ESP32_GENERIC_S3_ASR16M/   16MB 开发板
+  boards/ESP32_GENERIC_S3_XC16M/    小程掌机
+  partitions-8MiB.csv / -16MiB.csv  分区表（model/voice_data 分区）
+  Makefile                          构建入口 + 固件合成（makeimg.py，TTS 音色 .dat 在此指定）
+.github/workflows/
+  build esp32 firmware.yml          产出 8MB + ASR16M 固件（手动触发）
+  build xiaocheng handheld firmware.yml  产出掌机固件（手动触发）
+```
 
-Getting started
----------------
+**MicroPython 版本选择**：本仓库是完整 fork，版本即 fork 时点的上游版本（当前 v1.29，见 `py/mpconfig.h` 的 `MICROPY_VERSION_MAJOR/MINOR`），**没有配置项可选**。换版本 = 合并上游 tag：
 
-See the [online documentation](https://docs.micropython.org/) for the API
-reference and information about using MicroPython and information about how
-it is implemented.
+```bash
+git remote add upstream https://github.com/micropython/micropython.git
+git fetch upstream --tags
+git merge v1.28.0        # 换成目标版本 tag；本仓库改过的文件（ports/esp32/Makefile 等）可能有冲突
+```
 
-We use [GitHub Discussions](https://github.com/micropython/micropython/discussions)
-as our forum, and [Discord](https://discord.gg/RB8HZSAExQ) for chat. These
-are great places to ask questions and advice from the community or to discuss your
-MicroPython-based projects.
+合并后 push 即可，CI 编译的就是新版本。**注意**：`.mpy` 字节码与固件版本相关，跨版本需重编。
 
-For bugs and feature requests, please [raise an issue](https://github.com/micropython/micropython/issues/new/choose)
-and follow the templates there.
+**esp-sr 挂载方式（重要）**：CI 克隆 esp-sr 到工作区，经环境变量 `ESP_SR_COMPONENT_DIR` 作为**项目组件**挂载（EXTRA_COMPONENT_DIRS）。不要放 `IDF_PATH/components`——esp-sr 的依赖清单会破坏 bootloader 子构建的组件求解。
 
-For information about the [MicroPython pyboard](https://store.micropython.org/pyb-features),
-the officially supported board from the
-[original Kickstarter campaign](https://www.kickstarter.com/projects/214379695/micro-python-python-for-microcontrollers),
-see the [schematics and pinouts](http://github.com/micropython/pyboard) and
-[documentation](https://docs.micropython.org/en/latest/pyboard/quickref.html).
+## 2. 适配板卡
 
-MicroPython design values
--------------------------
+| 板卡 | 板名（boards/） | Flash | 音频硬件 | CI 工作流 |
+|---|---|---|---|---|
+| 8MB 立创开发板 | ESP32_GENERIC_S3 | 8MB | INMP441（无功放，TTS 不可用） | build esp32 firmware |
+| 16MB 开发板 | ESP32_GENERIC_S3_ASR16M | 16MB | INMP441 + MAX98357A | build esp32 firmware |
+| 小程掌机 | ESP32_GENERIC_S3_XC16M | 16MB | ES7210 + ES8311 + NS4152（共享 I²S） | build xiaocheng handheld firmware |
 
-"Perfection is achieved, not when there is nothing more to add, but when there
-is nothing left to take away." ―- Antoine de Saint-Exupéry.
+三块板验证状态：8MB 板与掌机全链路（唤醒+命令词+掌机 TTS/灯控）已板上验证通过；16MB 板硬件同 8MB，固件就绪待烧测。
 
-For its design and implementation, MicroPython aims to follow a set of values.
-Although not a strict set of rules, these values and principles serve as a
-useful guide for new and seasoned contributors, as well as maintainers.
+## 3. 编译
 
-MicroPython is at heart a combination of "Micro" and "Python": it's about
-resource constrained systems running the Python programming language.  Both of
-these concepts balance off against each other in all parts of MicroPython's
-design and implementation.
+**CI 编译（推荐）**：GitHub Actions 手动触发对应工作流，Artifacts 下载固件 zip。
 
-The key concepts that focus the development of MicroPython are:
-- Minimalism: do lots with little.
-- Efficiency: engineering, build, execution, storage, power consumption.
-- Consistency: the whole system feels like it was designed at once.
+**本地编译**：
 
-When using MicroPython, the Python language is used as the human interface to a
-system, giving fine control over the entities attached to that system.
-In a hardware setting, MicroPython aims to give the user a bare-metal feeling:
-one should feel like they have complete control over the system, with very
-little between the programmer and the physical world.
+```bash
+git submodule update --init
+make -C mpy-cross
+git clone https://github.com/espressif/esp-sr.git esp-sr        # 与 CI 同布局
+source esp-idf/export.sh                                        # 需 ESP-IDF v5.5.6
+cd ports/esp32
+ESP_SR_COMPONENT_DIR=$(pwd)/../../esp-sr make BOARD=ESP32_GENERIC_S3_XC16M BOARD_VARIANT=SPIRAM_OCT
+```
 
-MicroPython recognises that systems can be very complex.  The existing Python
-libraries in combination with the MicroPython-specific libraries provide a
-user-friendly way to harness the complexity of a system.
+esp-sr 预编译库要求：ICache 32KB / DCache 64KB / 64B line（各板 sdkconfig.board 已配）。
 
-Python language compatibility is very important to MicroPython, and at first
-glance MicroPython should look just like regular Python.  In the first instance,
-most Python scripts should run unchanged on MicroPython, even on devices with very
-tight resources.  Beyond that, there are ways to extend MicroPython if needed to
-better match Python.  The provided built-in modules are an efficient subset of
-the corresponding Python ones, without duplication of functionality, and allow
-extension in Python if needed.
+## 4. 烧录与测试
 
-Contributing
-------------
+### 4.1 烧录（一条命令）
 
-MicroPython is an open-source project and welcomes contributions. To be
-productive, please be sure to follow the
-[Contributors' Guidelines](https://github.com/micropython/micropython/wiki/ContributorGuidelines)
-and the [Code Conventions](https://github.com/micropython/micropython/blob/master/CODECONVENTIONS.md).
-Note that MicroPython is licenced under the MIT license, and all contributions
-should follow this license.
+固件已合并 bootloader/分区表/应用/srmodels/TTS 音色：
 
-About this repository
----------------------
+```bash
+esptool.py --chip esp32s3 --port COM口 --baud 921600 write_flash 0x0 固件.bin
+```
 
-This repository contains the following components:
-- [py/](py/) -- the core Python implementation, including compiler, runtime, and
-  core library.
-- [mpy-cross/](mpy-cross/) -- the MicroPython cross-compiler which is used to turn scripts
-  into precompiled bytecode.
-- [ports/](ports/) -- platform-specific code for the various ports and architectures that MicroPython runs on.
-- [lib/](lib/) -- submodules for external dependencies.
-- [tests/](tests/) -- test framework and test scripts.
-- [docs/](docs/) -- user documentation in Sphinx reStructuredText format. This is used to generate the [online documentation](http://docs.micropython.org).
-- [extmod/](extmod/) -- additional (non-core) modules implemented in C.
-- [tools/](tools/) -- various tools, including the pyboard.py module.
-- [examples/](examples/) -- a few example Python scripts.
+`erase_flash` 只在换板或出诡异问题时执行。模型超出分区容量时 makeimg.py 构建期直接报错，不会静默烧坏。
 
-"make" is used to build the components, or "gmake" on BSD-based systems.
-You will also need bash, gcc, and Python 3.3+ available as the command `python3`.
-Some ports (rp2 and esp32) additionally use CMake.
+### 4.2 分区布局
 
-Supported platforms & architectures
------------------------------------
+| 分区 | 8MB 板 | 16MB 板（含掌机） |
+|---|---|---|
+| factory（应用） | 0x10000, 2688K | 0x10000, 8192K |
+| model（srmodels） | 0x2B0000, 3000K | 0x810000, 3000K |
+| voice_data（TTS 音色） | 无 | 0xC17000, 3890K |
+| vfs（用户文件系统） | 0x59E000, 1472K | 0xAFE000, 1024K |
 
-MicroPython runs on a wide range of microcontrollers, as well as on Unix-like
-(including Linux, BSD, macOS, WSL) and Windows systems.
+### 4.3 接线
 
-Microcontroller targets can be as small as 256kiB flash + 16kiB RAM, although
-devices with at least 512kiB flash + 128kiB RAM allow a much more
-full-featured experience.
+**8MB/16MB 开发板**（双 I²S 控制器，收发独立，引脚全参数化）：
 
-The [Unix](ports/unix) and [Windows](ports/windows) ports allow both
-development and testing of MicroPython itself, as well as providing
-lightweight alternative to CPython on these platforms (in particular on
-embedded Linux systems).
+| 模块 | 引脚 | GPIO |
+|---|---|---|
+| INMP441 | SCK / WS / SD | 16 / 17 / 18 |
+| INMP441 | L/R | GND（左槽，slot=0） |
+| MAX98357A | BCLK / LRC / DIN | 39 / 40 / 38（仅 16MB 板，SD/GAIN 悬空） |
 
-Over twenty different MicroPython ports are provided in this repository,
-split across three
-[MicroPython Support Tiers](https://docs.micropython.org/en/latest/develop/support_tiers.html).
+**小程掌机**（ES7210+ES8311 双 codec，收发共享 I²S 总线，固件在 `amp_blck==mic_blck` 时自动切单控制器全双工）：
 
-Tier 1 Ports
-============
+| 器件 | 地址/引脚 | 说明 |
+|---|---|---|
+| ES7210（收音） | I²C 0x43，DIN=GPIO18 | 16bit，MIC1 增益 30dB，fs=MCLK/256 |
+| ES8311（播放） | I²C 0x18，SDIN=GPIO13 | 16k 播放配置用 `es8311_16k.py`（16k 与 24k 的 REG04 差异见该文件注释） |
+| 共享 I²S | BCLK=16 / WS=17 | MCLK=GPIO15，Python 侧 PWM 生成 4.096MHz（256×16k） |
+| XL9535 | I²C 0x20（SCL=7/SDA=12） | **AUDIO_PWR=P1.4 先上电；NS4152 功放使能 AMP_EN=P0.3 必须单独 `xl.output(AMP_EN,1)`，否则无声** |
 
-👑 Ports in [Tier 1](https://docs.micropython.org/en/latest/develop/support_tiers.html)
-are mature and have the most active development, support and testing:
+### 4.4 asr 模块 API
 
-| Port                     | Target                                                                                 | Quick Reference                                                      |
-|--------------------------|----------------------------------------------------------------------------------------|----------------------------------------------------------------------|
-| [esp32](ports/esp32)*    | Espressif ESP32 SoCs (ESP32, ESP32S2, ESP32S3, ESP32C3, ESP32C6)                       | [here](https://docs.micropython.org/en/latest/esp32/quickref.html)   |
-| [mimxrt](ports/mimxrt)   | NXP m.iMX RT                                                                           | [here](https://docs.micropython.org/en/latest/mimxrt/quickref.html)  |
-| [rp2](ports/rp2)         | Raspberry Pi RP2040 and RP2350                                                         | [here](https://docs.micropython.org/en/latest/rp2/quickref.html)     |
-| [samd](ports/samd)       | Microchip (formerly Atmel) SAMD21 and SAMD51                                           | [here](https://docs.micropython.org/en/latest/samd/quickref.html)    |
-| [stm32](ports/stm32)     | STMicroelectronics STM32 MCUs (F0, F4, F7, G0, G4, H5, H7, L0, L1, L4, N6, WB, WL)     | [here](https://docs.micropython.org/en/latest/pyboard/quickref.html) |
-| [unix](ports/unix)       | Linux, BSD, macOS, WSL                                                                 | [here](https://docs.micropython.org/en/latest/unix/quickref.html)    |
-| [windows](ports/windows) | Microsoft Windows                                                                      | [here](https://docs.micropython.org/en/latest/unix/quickref.html)    |
+```python
+import asr
 
-An asterisk indicates that the port has ongoing financial support from the vendor.
+asr.init_asr(wake_time=6000, wake_flag=1,     # 1=单次(每命令后重新等唤醒) 2=连续(窗口内连续识别)
+             mic_blck=16, mic_ws=17, mic_din=18,    # 麦克风 I2S 引脚
+             slot=0,          # 0=左槽(INMP441 L/R接地) 1=右槽
+             mic_bits=32,     # 32=INMP441  16=ES7210 等 codec
+             amp_blck=-1, amp_ws=-1, amp_dout=-1)  # 功放引脚；未接可全省略
+asr.start_asr()                # 创建识别任务，约 3~5s 后就绪
+asr.ready()                    # -> True 后才能加命令词
+asr.add_asr_command(1, "kai deng")   # mn7_cn 中文命令词必须传拼音，传汉字报 ret=259
+asr.set_asr_callback(cb)       # cb(id) 收命令词 ID
+asr.start_tts()                # TTS 初始化（需 voice_data 分区；必须在 add_tts_data 之前）
+asr.add_tts_data("灯已打开")    # 中文 UTF-8，esp-tts 播报
+asr.free_asr()                 # 释放；可反复 init/start，自动回收旧实例
+```
 
-Tier 2 Ports
-============
+I²C codec（ES7210/ES8311）由 Python 侧驱动先初始化，再调 `asr.init_asr()`；固件只管 I²S 总线，不锁引脚。
 
-✔ Ports in [Tier 2](https://docs.micropython.org/en/latest/develop/support_tiers.html)
-are less mature and less actively developed and tested than Tier 1, but
-still fully supported:
+### 4.5 测试脚本（工作区根目录，Thonny 直接运行）
 
-| Port                             | Target                                                      | Quick Reference                                                         |
-|----------------------------------|-------------------------------------------------------------|-------------------------------------------------------------------------|
-| [alif](ports/alif)               | Alif Semiconductor Ensemble MCUs (E3, E7)                   |                                                                         |
-| [embed](ports/embed)             | Generates a set of .c/.h files for embedding into a project |                                                                         |
-| [nrf](ports/nrf)                 | Nordic Semiconductor nRF51 and nRF52                        |                                                                         |
-| [renesas-ra](ports/renesas-ra)   | Renesas RA family                                           | [here](https://docs.micropython.org/en/latest/renesas-ra/quickref.html) |
-| [webassembly](ports/webassembly) | Emscripten port targeting browsers and NodeJS               |                                                                         |
-| [zephyr](ports/zephyr)           | Zephyr RTOS                                                 | [here](https://docs.micropython.org/en/latest/zephyr/quickref.html)     |
+| 脚本 | 板卡 | 内容 |
+|---|---|---|
+| `asr_test_8m.py` | 8MB 板 | 基础识别（唤醒+命令词） |
+| `asr_test.py` | 掌机 | 基础识别（含 XL9535 上电、MCLK PWM、ES7210 初始化、16k 链路检查） |
+| `asr_test_ws2812_tts.py` | 掌机 | 命令动作：开灯/关灯→WS2812(GPIO42,10灯)+TTS，拍照→TTS |
+| `tts_probe.py` | 掌机 | 播放硬件探针：machine.I2S 直推 ES8311 播哔声，隔离硬件/固件问题 |
 
-Tier 3 Ports
-============
+驱动文件在仓库外 `驱动/` 文件夹（xl9535.py / es7210.py / es8311.py / es8311_16k.py），前两者与 es8311_16k.py 需上传到掌机板子。
 
-Ports in [Tier 3](https://docs.micropython.org/en/latest/develop/support_tiers.html)
-are built in CI but not regularly tested by the MicroPython maintainers:
+### 4.6 固件日志关键行
 
-| Port                       | Target                                                            | Quick Reference                                                         |
-|----------------------------|-------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [cc3200](ports/cc3200)     | Texas Instruments CC3200                                          | [For WiPy](https://docs.micropython.org/en/latest/wipy/quickref.html)   |
-| [esp8266](ports/esp8266)   | Espressif ESP8266 SoC                                             | [here](https://docs.micropython.org/en/latest/esp8266/quickref.html)    |
-| [pic16bit](ports/pic16bit) | Microchip PIC 16-bit                                              |                                                                         |
-| [powerpc](ports/powerpc)   | IBM PowerPC (including Microwatt)                                 |                                                                         |
+| 日志 | 含义 |
+|---|---|
+| `[ASR] models loaded: 3` | wn9 / fst / mn7_cn 全加载 |
+| `[ASR] mn created: heap_free=...` | MN 模型创建成功 + 资源余量 |
+| `[ASR] cmd add id=1 ret=0` + `cmd list` | 命令词写入成功并回显清单 |
+| `[ASR] wake detected` | 唤醒词触发 |
+| `[ASR] mic peak=X`（每 3 秒） | 说话应上千，静音约 100 |
 
-Additional Ports
-================
+默认固件只输出 ERROR 级 esp-sr 日志；要看模型加载 INFO 日志：`import esp; esp.osdebug(False)`。
 
-In addition to the above there is a Tier M containing ports that are used
-primarily for maintenance, development and testing:
+## 5. 更换唤醒词 / TTS 音色（编译期配置，改完需重编译）
 
-- The ["bare-arm"](ports/bare-arm) port is an example of the absolute minimum
-  configuration that still includes the compiler, and is used to keep track
-  of the code size of the core runtime and VM.
+**换唤醒词**：改对应板子的 `ports/esp32/boards/<板名>/sdkconfig.board` 一行，如：
 
-- The ["minimal"](ports/minimal) port provides an example of a very basic
-  MicroPython port and can be compiled as both a standalone Linux binary as
-  well as for ARM Cortex-M4. Start with this if you want to port MicroPython
-  to another microcontroller.
+```
+CONFIG_SR_WN_WN9_XIAOMINGTONGXUE_TTS2=y   # 小明同学
+```
 
-- The [qemu](ports/qemu) port is a QEMU-based emulated target for Cortex-A,
-  Cortex-M, RISC-V 32-bit and RISC-V 64-bit architectures.
+符号规则：esp-sr 模型文件夹 `wn9_xxx` → 符号 `SR_WN_WN9_XXX`（大写）。候选清单见 esp-sr 仓库 `wakeword_list.md`（60+ 个），符号须存在于 `Kconfig.projbuild` 的 "Load Multiple Wake Words" 菜单。官方多数模型为 TTS 流水线生成，泛化性能需上板实测。自制唤醒词走乐鑫官方免费定制训练（周期约 2~4 周），模型文件夹进仓库后用 `CONFIG_ESP_SR_EXTERNAL_MODEL_PATH` 指向。wn10 代模型算力开销大，与 `AFE_MODE_LOW_COST` 兼容性未验证。Python 侧零改动。
 
-The MicroPython cross-compiler, mpy-cross
------------------------------------------
+**换 TTS 音色**：改 `ports/esp32/Makefile` 末尾的 .dat 路径：`xiaole`（小乐女声 2.87MB，当前）/ `xiaoxin`（3.64MB）/ `xiaoxin_small`（2.78MB）。掌机 3890K 分区均可容纳。代码用 `esp_tts_voice_template`+分区 mmap，换音色无需改 C 代码。仅对有 voice_data 分区的板生效；不支持自定义录音音色。
 
-Most ports require the [MicroPython cross-compiler](mpy-cross) to be built
-first.  This program, called mpy-cross, is used to pre-compile Python scripts
-to .mpy files which can then be included (frozen) into the
-firmware/executable for a port.  To build mpy-cross use:
+## 6. 故障排查速查
 
-    $ cd mpy-cross
-    $ make
+| 现象 | 排查 |
+|---|---|
+| `import asr` 报错 | 固件不含 asr 模块——确认烧的是本仓库 CI 产物 |
+| 模型加载失败 | `[ASR] model partition empty`＝srmodels 没烧上（整包重烧 0x0）；`no chinese MN model`＝srmodels 与 sdkconfig 不匹配 |
+| 唤醒无反应 | ①确认唤醒词与固件 sdkconfig 一致；②`slot` 与 L/R 接法不匹配（接地=0）对调；③距离/音量 |
+| 命令词添加失败 | 必须在 `asr.ready()` 为 True 后、`start_asr()` 之后添加；传拼音；2~5 个字 |
+| 掌机完全无声 | **先查 AMP_EN(P0.3) 是否使能**；再查 ES8311 寄存器回读、MCLK PWM、跑 `tts_probe.py` 定位 |
+| 识别误触发多 | 环境噪声问题：远离噪声源、缩短 `wake_time` |
 
-External dependencies
----------------------
+## 7. 上游文档
 
-The core MicroPython VM and runtime has no external dependencies, but a given
-port might depend on third-party drivers or vendor HALs. This repository
-includes [several submodules](lib/) linking to these external dependencies.
-Before compiling a given port, use
-
-    $ cd ports/name
-    $ make submodules
-
-to ensure that all required submodules are initialised.
+MicroPython 本体的通用文档（REPL、语言特性、其他端口）见 [docs.micropython.org](https://docs.micropython.org) 与上游仓库 README 历史。

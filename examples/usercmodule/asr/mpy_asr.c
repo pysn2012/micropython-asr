@@ -164,7 +164,7 @@ static mp_obj_t mp_add_tts_data(mp_obj_t data) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mp_add_tts_data_obj, mp_add_tts_data);
 
-static const mp_rom_map_elem_t k10_asr_globals_table[] = {
+static const mp_rom_map_elem_t mpy_asr_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_asr) },
     { MP_ROM_QSTR(MP_QSTR_init_asr), MP_ROM_PTR(&mp_init_asr_obj) },//初始化麦克风，I2S
     { MP_ROM_QSTR(MP_QSTR_set_asr_callback), MP_ROM_PTR(&mp_set_asr_callback_obj) },//设置音频采集回调
@@ -178,11 +178,11 @@ static const mp_rom_map_elem_t k10_asr_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_add_tts_data), MP_ROM_PTR(&mp_add_tts_data_obj) },//TTS数据队列
 };
 
-static MP_DEFINE_CONST_DICT(k10_asr_globals, k10_asr_globals_table);
+static MP_DEFINE_CONST_DICT(mpy_asr_globals, mpy_asr_globals_table);
 
-const mp_obj_module_t mp_k10_asr_system = {
+const mp_obj_module_t mp_mpy_asr_system = {
     .base = { &mp_type_module },
-    .globals = (mp_obj_dict_t *)&k10_asr_globals,
+    .globals = (mp_obj_dict_t *)&mpy_asr_globals,
 };
 
-MP_REGISTER_MODULE(MP_QSTR_asr, mp_k10_asr_system);
+MP_REGISTER_MODULE(MP_QSTR_asr, mp_mpy_asr_system);

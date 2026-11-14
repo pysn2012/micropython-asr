@@ -1,8 +1,8 @@
-# K10 ASR模块编译配置
+# MPY ASR 模块编译配置
 
 # 源文件
-SRC = k10_asr.c
-OBJ = k10_asr.o
+SRC = mpy_asr.c
+OBJ = mpy_asr.o
 
 # 编译选项
 CFLAGS = -Wall -Wextra -std=c99 -O2
@@ -22,7 +22,7 @@ clean:
 # 安装到MicroPython
 install: $(OBJ)
 	@echo "将编译好的模块复制到MicroPython构建目录"
-	@echo "请手动将k10_asr.o复制到相应的构建目录"
+	@echo "请手动将mpy_asr.o复制到相应的构建目录"
 
 # 帮助
 help:
