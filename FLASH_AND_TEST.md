@@ -104,10 +104,11 @@ asr.start_asr()
 
 ```python
 # 命令词必须在 start_asr() 之后添加（MultiNet实例此时才创建），ID从1开始，2~5个字
-asr.add_asr_command(1, "开灯")
-asr.add_asr_command(2, "关灯")
-asr.add_asr_command(3, "向前走")
-asr.add_asr_command(4, "向后退")
+# mn7_cn/MultiNet7 中文命令词传拼音，不传汉字
+asr.add_asr_command(1, "kai deng")
+asr.add_asr_command(2, "guan deng")
+asr.add_asr_command(3, "xiang qian zou")
+asr.add_asr_command(4, "xiang hou tui")
 
 def on_command(id):
     print("识别到命令ID:", id)

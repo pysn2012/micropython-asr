@@ -51,8 +51,9 @@ asr.start_asr()
 time.sleep(2)  # 等模型加载
 
 # 命令词必须在 start_asr() 之后添加（esp-sr 的 MultiNet 实例此时才创建）
-asr.add_asr_command(1, "开灯")
-asr.add_asr_command(2, "关灯")
+# mn7_cn/MultiNet7 中文命令词传拼音，不传汉字
+asr.add_asr_command(1, "kai deng")
+asr.add_asr_command(2, "guan deng")
 
 def on_command(id):
     print("识别到命令ID:", id)
